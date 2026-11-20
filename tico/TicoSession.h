@@ -23,6 +23,7 @@
 #pragma once
 
 #include "TicoSecure.h"
+#include "../gbastation/session_host.hpp"
 
 // A core that keeps nlohmann/json elsewhere includes it before this file.
 #ifndef INCLUDE_NLOHMANN_JSON_HPP_
@@ -74,6 +75,10 @@ struct Session {
 
 /// @brief The session for this run, read once.
 inline const Session &CurrentSession() {
+  if (woplay_host::active()) {
+    static const Session empty;
+    return empty;
+  }
   static Session session = [] {
     Session s;
     std::string text;
@@ -121,6 +126,7 @@ inline const Session &CurrentSession() {
 /// sdmc:/tico/config/<name>.jsonc they were kept in before.
 /// @{
 inline std::string SettingsText(const char *name) {
+  if (woplay_host::active()) return {};
   const Session &s = CurrentSession();
   const auto it = s.settings.find(name);
   if (it != s.settings.end())

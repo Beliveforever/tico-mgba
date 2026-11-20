@@ -51,6 +51,8 @@ bool Init(SDL_Window *window, uint32_t width, uint32_t height);
 void Shutdown();
 
 const Context &Ctx();
+VkRenderPass SwapRenderPass();
+VkFormat SwapFormat();
 
 /// Slot of the frame being recorded, 0..kFramesInFlight-1.
 uint32_t FrameIndex();

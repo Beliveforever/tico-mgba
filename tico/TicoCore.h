@@ -6,13 +6,13 @@
 #include <map>
 #include <cstdint>
 #include <SDL.h>
+#include <SDL_mixer.h>
 #include <vector>
 #include "libretro.h"
 #include "imgui.h"
 
 #ifdef __SWITCH__
 #include <switch.h>
-#include <SDL_mixer.h>
 #endif
 
 #include <mutex>
@@ -130,6 +130,7 @@ public:
     /// @brief Save states
     /// The state goes to `path`, rc_client's achievement progress beside it
     /// (`path` + ".ra"). Loading is refused while hardcore is active.
+    bool SavePersistent();
     bool SaveState(const std::string &path);
     bool LoadState(const std::string &path);
 
@@ -173,7 +174,7 @@ private:
     void SetupCallbacks();
 
     void LoadSaveData();
-    void SaveSaveData();
+    bool SaveSaveData();
     std::string CheatFilePath(const char *extension) const;
     void LoadCheats();
     void ApplyCheats();
@@ -182,7 +183,7 @@ private:
     std::vector<Cheat> m_cheats;
     bool m_cheatsRecovered = false;
     void LoadRtcData();
-    void SaveRtcData();
+    bool SaveRtcData();
 
     /// The loaded ROM, unpacked; kept for RetroAchievements hashing.
     std::vector<uint8_t> m_romData;

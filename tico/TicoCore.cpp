@@ -4,6 +4,7 @@
 /// <game>.srm (an older tico's <game>.sav is renamed to it)
 
 #include "TicoCore.h"
+#include "../gbastation/session_host.hpp"
 #include "TicoSession.h"
 #include "overlay/tico_config.h"
 #include "TicoVulkan.h"
@@ -53,8 +54,9 @@ static constexpr int kStateBackups = 1;
 
 // The cartridge clock (S-RTC, SPC7110), kept beside the save as <rom>.rtc
 // like RetroArch does. Only those few carts have one.
-static std::string RtcPath(const std::string &gamePath)
+static std::string RtcPath(const std::string &gamePath, bool loading)
 {
+    if (woplay_host::active()) return woplay_host::batteryFile(".rtc", loading);
     std::string filename = gamePath;
     size_t lastSlash = filename.find_last_of("/\\");
     if (lastSlash != std::string::npos)
@@ -72,25 +74,27 @@ void TicoCore::LoadRtcData()
     if (!size || !data)
         return;
 
-    const std::string path = RtcPath(m_gamePath);
+    const std::string path = RtcPath(m_gamePath, true);
     std::ifstream file(path, std::ios::binary);
     if (file && file.read((char *)data, size))
         tico_debug_log("Loaded RTC from %s", path.c_str());
 }
 
-void TicoCore::SaveRtcData()
+bool TicoCore::SaveRtcData()
 {
     const size_t size = retro_get_memory_size(RETRO_MEMORY_RTC);
     const void *data = retro_get_memory_data(RETRO_MEMORY_RTC);
     if (!size || !data)
-        return;
+        return true;
 
     TicoConfig::MakeDirs(TicoConfig::SavesPath());
-    const std::string path = RtcPath(m_gamePath);
-    if (TicoSafeFile::Write(path, data, size, kSaveBackups))
+    const std::string path = RtcPath(m_gamePath, false);
+    const bool saved = TicoSafeFile::Write(path, data, size, kSaveBackups);
+    if (saved)
         tico_debug_log("Saved RTC to %s", path.c_str());
     else
         tico_debug_log("ERROR: could not save RTC to %s", path.c_str());
+    return saved;
 }
 
 void TicoCore::LoadSaveData()
@@ -110,6 +114,12 @@ void TicoCore::LoadSaveData()
     size_t lastDot = filename.find_last_of(".");
     if (lastDot != std::string::npos)
         filename = filename.substr(0, lastDot);
+
+    if (woplay_host::active()) {
+        std::ifstream save(woplay_host::batteryFile(".srm", true), std::ios::binary);
+        if (save) save.read(static_cast<char*>(data), size);
+        return;
+    }
 
     // libretro's own name for it (.srm). Before, tico wrote <game>.sav: that
     // file becomes the .srm the first time the game runs.
@@ -140,15 +150,12 @@ void TicoCore::LoadSaveData()
     }
 }
 
-void TicoCore::SaveSaveData()
+bool TicoCore::SaveSaveData()
 {
     size_t size = retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
-    if (!size)
-        return;
-
-    void *data = retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
-    if (!data)
-        return;
+    if (!size) return true;
+    const void *data = retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+    if (!data) return true;
 
     std::string filename = m_gamePath;
     size_t lastSlash = filename.find_last_of("/\\");
@@ -161,12 +168,30 @@ void TicoCore::SaveSaveData()
     struct stat st = {0};
     TicoConfig::MakeDirs(TicoConfig::SavesPath());
 
-    std::string savePath = TicoConfig::SavesPath() + filename + ".srm";
-
-    if (TicoSafeFile::Write(savePath, data, size, kSaveBackups))
+    const auto savePath = woplay_host::active() ? woplay_host::batteryFile(".srm", false)
+                                                  : TicoConfig::SavesPath() + filename + ".srm";
+    const bool saved = TicoSafeFile::Write(savePath, data, size, kSaveBackups);
+    if (saved)
         tico_debug_log("Saved SRAM to %s", savePath.c_str());
     else
         tico_debug_log("ERROR: could not save SRAM to %s", savePath.c_str());
+    return saved;
+}
+
+bool TicoCore::SavePersistent() {
+    if (!m_gameLoaded) return true;
+#ifdef WOPLAY_HOST
+    try {
+#endif
+        const bool save = SaveSaveData();
+        const bool rtc = SaveRtcData();
+        return save && rtc;
+#ifdef WOPLAY_HOST
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "WoPlay saves: %s\n", error.what());
+        return false;
+    }
+#endif
 }
 
 #include "libretro.h"
@@ -528,6 +553,7 @@ namespace TicoConfig {
 // <system>/gba/, the module's system_dir, for every console it runs.
 std::string SystemPath()
 {
+    if (woplay_host::active()) return woplay_host::directory("system");
     // The emulator's own BIOS folder; before 3.0.1 it was named after the
     // console. tico moves it too, but this core may start without tico.
     const std::string root = ContentRoot("tico_system_path", "sdmc:/tico/system/");
@@ -536,8 +562,8 @@ std::string SystemPath()
         rename((root + "gba").c_str(), (root + "mgba").c_str());
     return root + "mgba/";
 }
-std::string SavesPath() { return tico::UserContentRoot(ContentRoot("tico_saves_path", "sdmc:/tico/saves/"), true) + CURRENT_SLUG + "/"; }
-std::string StatesPath() { return tico::UserContentRoot(ContentRoot("tico_states_path", "sdmc:/tico/states/"), false) + CURRENT_SLUG + "/"; }
+std::string SavesPath() { if (woplay_host::active()) return woplay_host::directory("save"); return tico::UserContentRoot(ContentRoot("tico_saves_path", "sdmc:/tico/saves/"), true) + CURRENT_SLUG + "/"; }
+std::string StatesPath() { if (woplay_host::active()) return woplay_host::directory("state"); return tico::UserContentRoot(ContentRoot("tico_states_path", "sdmc:/tico/states/"), false) + CURRENT_SLUG + "/"; }
 
 void MakeDirs(const std::string &path)
 {
@@ -933,20 +959,27 @@ bool TicoCore::ReadRomFromArchive(const std::string &path, std::vector<uint8_t> 
     constexpr size_t kMaxRom = 64u * 1024u * 1024u;
     bool found = false;
     struct archive_entry *entry = nullptr;
-    while (!found && archive_read_next_header(ar, &entry) == ARCHIVE_OK)
+    int headerResult;
+    while (!found && (headerResult = archive_read_next_header(ar, &entry)) != ARCHIVE_EOF &&
+           headerResult >= ARCHIVE_WARN)
     {
-        const char *name = archive_entry_pathname(entry);
+        const char *name = archive_entry_pathname_utf8(entry);
+        if (!name) name = archive_entry_pathname(entry);
         if (!name || archive_entry_filetype(entry) != AE_IFREG)
             continue;
         const std::string entryName = name;
         if (!IsRomName(entryName))
             continue;
+        const auto expectedSize = archive_entry_size(entry);
+        if (archive_entry_size_is_set(entry) && expectedSize > static_cast<la_int64_t>(kMaxRom))
+            continue;
         out.clear();
-        if (archive_entry_size_is_set(entry) && archive_entry_size(entry) > 0)
-            out.reserve((size_t)archive_entry_size(entry));
+        if (expectedSize > 0)
+            out.reserve(static_cast<size_t>(expectedSize));
         uint8_t chunk[64 * 1024];
         la_ssize_t read;
-        while ((read = archive_read_data(ar, chunk, sizeof(chunk))) > 0 && out.size() <= kMaxRom)
+        while ((read = archive_read_data(ar, chunk, sizeof(chunk))) > 0 &&
+               static_cast<size_t>(read) <= kMaxRom - out.size())
             out.insert(out.end(), chunk, chunk + read);
         found = read == 0 && !out.empty() && out.size() <= kMaxRom;
         if (found)
@@ -1066,13 +1099,12 @@ void TicoCore::UnloadGame()
     if (!m_gameLoaded)
         return;
 
-    SaveSaveData();
-    SaveRtcData();
+    SavePersistent();
     DisarmCheatGuard(); // a clean exit, whatever cheats were on
 
     // retro_unload_game must run before DestroyHWRenderContext
     tico_debug_log("Calling retro_unload_game...");
-    tico::PlaytimeFlush(); // the game's last seconds
+    if (!woplay_host::active()) tico::PlaytimeFlush(); // the game's last seconds
     retro_unload_game();
     tico_debug_log("retro_unload_game done");
 
@@ -1090,7 +1122,8 @@ void TicoCore::RunFrame()
         return;
 
     retro_run();
-    tico::PlaytimeFrame(); // this frame's time to the player's playtime
+    if (woplay_host::active()) woplay_host::frame();
+    else tico::PlaytimeFrame(); // this frame's time to the player's playtime
 
     // RetroAchievements frame tick
     if (m_rcClient) {
@@ -1136,6 +1169,7 @@ void tico_cheat_reset(void);
 // sdmc:/tico/cheats/gba/<game><extension>
 std::string TicoCore::CheatFilePath(const char *extension) const
 {
+    if (woplay_host::active()) return woplay_host::cheatsFile(extension);
     std::string name = m_gamePath;
     const size_t slash = name.find_last_of("/\\");
     if (slash != std::string::npos)
@@ -1973,8 +2007,11 @@ void TicoCore::SetOption(const std::string &key, const std::string &value)
 
 void TicoCore::LoadConfig()
 {
-    if (m_configLoaded)
+    if (m_configLoaded) return;
+    if (woplay_host::active()) {
+        m_configLoaded = true;
         return;
+    }
 
     const char *configPath;
 #ifdef __SWITCH__
@@ -2042,6 +2079,7 @@ bool TicoCore::GetVariable(const char *key, const char **value)
 
 void TicoCore::LoadRAConfig()
 {
+    if (woplay_host::active()) return;
     // tico hands over only a token, in the sealed session (TicoSession.h);
     // the password stays with tico.
     const tico::Session& session = tico::CurrentSession();

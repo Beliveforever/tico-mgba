@@ -1,0 +1,26 @@
+{
+  "id": "mgba",
+  "name": "mGBA",
+  "version": "3.0.2-woplay.2",
+  "nro": "woplay-mgba.nro",
+  "executables": { "macos": "woplay-mgba" },
+  "settings": "../../config/cores/mgba/settings.json",
+  "profileStorageVersion": 1,
+  "hostSessionVersion": 1,
+  "woplayDisplayConfig": true,
+  "stateExtensions": [".state", ".state0", ".state1", ".state2", ".state3", ".state4", ".state5"],
+  "system_dir": "mgba",
+  "is_libretro": true,
+  "achievements": false,
+  "systems": [
+    {
+      "slug": "gba",
+      "title": "Game Boy Advance",
+      "short_title": "GBA",
+      "extensions": [".gba", ".gb", ".gbc", ".sgb", ".zip", ".7z", ".rar"],
+      "games_file": "gba.dat"
+    },
+    { "slug": "gb", "title": "Game Boy", "short_title": "GB", "extensions": [".gb", ".sgb", ".zip", ".7z", ".rar"] },
+    { "slug": "gbc", "title": "Game Boy Color", "short_title": "GBC", "extensions": [".gbc", ".zip", ".7z", ".rar"] }
+  ]
+}

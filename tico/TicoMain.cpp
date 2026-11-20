@@ -3,7 +3,11 @@
 /// Sets up SDL/Vulkan/ImGui and runs the main loop
 
 #include "TicoCore.h"
+#include "../gbastation/session_host.hpp"
+#include "../gbastation/menu_host.hpp"
+#include <clocale>
 #include "TicoSession.h"
+#include "TicoSafeFile.h"
 #include "UsbStorage.h"
 #include "TicoConfig.h"
 #include "TicoAudio.h"
@@ -42,11 +46,13 @@
 
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
+#include <SDL_vulkan.h>
 
 //==============================================================================
 // NX System Configuration (extern "C")
 //==============================================================================
 
+#ifdef __SWITCH__
 extern "C" {
 u32 __NvOptimusEnablement = 1;
 u32 __NvDeveloperOption = 1;
@@ -54,6 +60,7 @@ u32 __nx_applet_type = AppletType_Application;
 u32 __nx_applet_exit_mode = 0; // 0 = standard exit (return to Homebrew ABI loader if NRO). 1 = forceful applet exit
 size_t __nx_heap_size = 0;
 }
+#endif
 
 //==============================================================================
 // Globals
@@ -74,12 +81,17 @@ static std::unique_ptr<TicoCore> g_core;
 static bool g_standalone = false;
 static std::string g_pendingLaunch;
 static void ShowLibrary();
+static void OpenMenu();
+static void CloseMenu();
+static bool g_waitGameInput = false;
+static bool g_woplayAutoSaved = false;
 static void StartGame(const std::string &slug, const std::string &romArg, const std::string &titleArg);
 // the title the running game was started with, for Restart
 static std::string g_titleArg;
 
 // Quick menu
 static bool g_menuOpen = false;
+static void RunWoPlayState(const woplay_host::StateRequest& request);
 static bool g_overlayReady = false;
 static bool g_toggleHeld = false;
 static uint32_t g_navHeldPrev = 0;
@@ -244,7 +256,14 @@ bool InitWindow()
     LOG_INFO("HOME", "Switch Resolution: %dx%d (logical)", w, h);
 
 #else
-    g_window = SDL_CreateWindow("mgba",
+#if defined(__APPLE__) && defined(WOPLAY_HOST)
+    const auto* library = std::getenv("GBS_VULKAN_LIBRARY");
+    if (SDL_Vulkan_LoadLibrary(library ? library : WOPLAY_MOLTENVK) != 0) {
+        std::fprintf(stderr, "MoltenVK: %s\n", SDL_GetError());
+        return false;
+    }
+#endif
+    g_window = SDL_CreateWindow(woplay_host::active() ? "WoPlay - mGBA" : "mgba",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                 TicoConfig::WINDOW_WIDTH, TicoConfig::WINDOW_HEIGHT,
                                 SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
@@ -367,10 +386,10 @@ static void FramePixel(unsigned x, unsigned y, uint8_t *out)
 
 // Saves the last frame beside a save state, shrunk to fit 256x192 (box
 // filtered), just big enough for the Save/Load State panel.
-static void SaveStatePicture(const std::string &path)
+static bool SaveStatePicture(const std::string &path)
 {
     if (g_lastFrame.data.empty() || !g_lastFrame.width || !g_lastFrame.height)
-        return;
+        return false;
     const unsigned srcW = g_lastFrame.width, srcH = g_lastFrame.height;
     const float fit = std::min({1.0f, 256.0f / srcW, 192.0f / srcH});
     const unsigned dstW = std::max(1u, (unsigned)(srcW * fit));
@@ -400,7 +419,15 @@ static void SaveStatePicture(const std::string &path)
             dst[3] = 255;
         }
     }
-    stbi_write_png(path.c_str(), (int)dstW, (int)dstH, 4, out.data(), (int)dstW * 4);
+    struct Output {
+        const std::string& path;
+        bool written = false;
+    } output{path};
+    const auto write = [](void* context, void* bytes, int size) {
+        auto& file = *static_cast<Output*>(context);
+        file.written = size > 0 && TicoSafeFile::Write(file.path,bytes,static_cast<std::size_t>(size),0);
+    };
+    return stbi_write_png_to_func(write,&output,dstW,dstH,4,out.data(),dstW*4) && output.written;
 }
 
 static void AudioFlushCallback()
@@ -418,12 +445,16 @@ bool InitImGui()
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    if (woplay_host::active()) io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     LOG_INFO("HOME", "ImGui context created");
 
     // Switch has no SDL window and the overlay reads the pads itself, so the
     // SDL platform backend is desktop-only.
 #ifndef __SWITCH__
     ImGui_ImplSDL2_InitForVulkan(g_window);
+#ifdef WOPLAY_HOST
+    if (woplay_host::active()) ImGui_ImplSDL2_SetGamepadMode(ImGui_ImplSDL2_GamepadMode_Manual, nullptr, 0);
+#endif
 #endif
     int w, h;
     GetDisplayResolution(w, h);
@@ -433,6 +464,7 @@ bool InitImGui()
         return false;
     }
     LOG_INFO("HOME", "ImGui backends initialized");
+    if (woplay_host::active()) return woplay_menu::loadFonts();
 
 #ifdef __SWITCH__
     ImFontConfig fontCfg;
@@ -496,9 +528,38 @@ void ProcessEvents()
     while (SDL_PollEvent(&event))
     {
 #ifndef __SWITCH__
-        ImGui_ImplSDL2_ProcessEvent(&event);
+        bool framingInput = false;
+        if (woplay_host::active()) {
+            if (event.type == SDL_MOUSEMOTION)
+                framingInput = woplay_menu::gamePointer({float(event.motion.x),float(event.motion.y)},
+                                                        (event.motion.state & SDL_BUTTON_LMASK) != 0);
+            else if ((event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) &&
+                     event.button.button == SDL_BUTTON_LEFT)
+                framingInput = woplay_menu::gamePointer({float(event.button.x),float(event.button.y)},
+                                                        event.type == SDL_MOUSEBUTTONDOWN);
+            else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+                woplay_menu::gamePointer({},false);
+        }
+        if (!framingInput) ImGui_ImplSDL2_ProcessEvent(&event);
+        // The save slot shortcut uses the physical key even with a different keyboard layout.
+        if (woplay_host::active() && (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) &&
+            event.key.keysym.scancode == SDL_SCANCODE_X)
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_X,event.type == SDL_KEYDOWN);
 #endif
 
+        if (woplay_host::active() && g_core && event.type == SDL_KEYDOWN && !event.key.repeat &&
+            event.key.keysym.scancode == SDL_SCANCODE_F1) {
+            if (g_menuOpen) CloseMenu();
+            else OpenMenu();
+        }
+        if (woplay_host::active() && g_core && !g_menuOpen && event.type == SDL_KEYDOWN && !event.key.repeat) {
+            using woplay_host::StateGroup;
+            using woplay_host::StateOperation;
+            if (event.key.keysym.scancode == SDL_SCANCODE_F5)
+                RunWoPlayState({StateOperation::Save,StateGroup::Cycle});
+            else if (event.key.keysym.scancode == SDL_SCANCODE_F8)
+                RunWoPlayState({StateOperation::Load,StateGroup::Cycle});
+        }
         if (event.type == SDL_QUIT)
         {
             LOG_INFO("HOME", "Received SDL_QUIT event");
@@ -540,6 +601,7 @@ static void ChainloadTico()
     else if (stat(fallbackNro, &buffer) == 0)
         targetNro = fallbackNro;
 
+    if (woplay_host::active()) return;
     if (targetNro != nullptr)
     {
         // Build args as space-separated string (per libnx envSetNextLoad docs)
@@ -556,8 +618,9 @@ static void ChainloadTico()
 #endif
 }
 
-static std::string StatePath(int slot)
+static std::string StatePath(int slot, bool loading = false)
 {
+    (void)loading;
     std::string romName = g_core ? g_core->GetGamePath() : std::string();
     size_t lastSlash = romName.find_last_of("/\\");
     if (lastSlash != std::string::npos)
@@ -570,44 +633,80 @@ static std::string StatePath(int slot)
     return dir + romName + ".state" + std::to_string(slot);
 }
 
-// The state the game is left in, saved to the auto slot (listed first in Load
-// State) whenever the core closes: Exit, Restart, the library, HOME.
-static void AutoSaveState()
+static int WriteWoPlayState(woplay_host::StateGroup group, int slot = 0)
 {
-    if (!g_core || !g_core->IsGameLoaded())
-        return;
-    const std::string path = StatePath(OverlayUI::kAutoStateSlot - 1);
-    if (g_core->SaveState(path))
-        SaveStatePicture(path + ".png");
+    return woplay_host::saveState(group, slot, [](const std::string& path) {
+        const auto preview = path.substr(0,path.find_last_of('/')+1) + "preview.png";
+        return g_core->SaveState(path) && SaveStatePicture(preview);
+    });
 }
 
-// Set when a game starts; once its first frame has run, the menu asks whether
-// to continue from the auto save, if it has one.
+static std::string ResumeStatePath()
+{
+    if (!woplay_host::active()) return StatePath(OverlayUI::kAutoStateSlot - 1,true);
+    try {
+        return woplay_host::stateFile(woplay_host::StateGroup::Resume);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+// The state the game is left in, saved to the auto slot (listed first in Load
+// State) whenever the core closes: Exit, Restart, the library, HOME.
+static bool AutoSaveState()
+{
+    if (!g_core || !g_core->IsGameLoaded() || g_core->IsHardcoreActive())
+        return true;
+    if (woplay_host::active()) {
+        try {
+            return WriteWoPlayState(woplay_host::StateGroup::Resume) > 0;
+        } catch (const std::exception& error) {
+            LOG_ERROR("HOME", "Save resume state: %s", error.what());
+            return false;
+        }
+    }
+    const std::string path = StatePath(OverlayUI::kAutoStateSlot - 1);
+    if (!g_core->SaveState(path)) return false;
+    SaveStatePicture(path + ".png");
+    return true;
+}
+
+// Check the startup policy after the first game frame.
 static bool g_offerResume = false;
 static void OpenMenu();
+
+static std::string CoreText(const std::string& key) {
+    return woplay_host::active() ? woplay_menu::translate(key) : SwitchFrontend::OverlayTranslation::tr(key);
+}
+
+static void CoreToast(const std::string& text) {
+    if (woplay_host::active()) woplay_menu::notify(text);
+    else OverlayUI::ShowToast(text);
+}
 
 static void OfferResume()
 {
     g_offerResume = false;
     // tico's General > Quick Menu Tip: shown once the game runs smoothly
-    OverlayUI::ShowQuickMenuTip();
-    struct stat st;
-    if (!g_core || g_core->IsHardcoreActive() ||
-        stat(StatePath(OverlayUI::kAutoStateSlot - 1).c_str(), &st) != 0)
-        return;
-    // tico's General > Continue Last Game
+    if (!woplay_host::active()) OverlayUI::ShowQuickMenuTip();
     const std::string mode = OverlayConfig::ResumeOnLaunch();
     if (mode == "never")
         return;
+    const auto path = ResumeStatePath();
+    struct stat st;
+    if (!g_core || g_core->IsHardcoreActive() || path.empty() || stat(path.c_str(), &st) != 0)
+        return;
     if (mode == "always")
     {
-        if (g_core->LoadState(StatePath(OverlayUI::kAutoStateSlot - 1)))
-            OverlayUI::ShowToast(SwitchFrontend::OverlayTranslation::tr("emulator_auto_loaded"));
+        if (g_core->LoadState(path))
+            CoreToast(CoreText("emulator_auto_loaded"));
         return;
     }
     OpenMenu();
-    if (g_menuOpen)
-        OverlayUI::ShowResumePrompt();
+    if (g_menuOpen) {
+        if (woplay_host::active()) woplay_menu::offerResume();
+        else OverlayUI::ShowResumePrompt();
+    }
 }
 
 //==============================================================================
@@ -640,11 +739,20 @@ static bool EndsWith(const std::string &s, const char *suffix)
 
 static std::string ShaderPreset()
 {
+    if (woplay_host::active()) {
+        const auto text = woplay_host::optionJson("shader_preset");
+        const auto value = nlohmann::json::parse(text, nullptr, false);
+        return value.is_string() ? value.get<std::string>() : std::string{};
+    }
     return OverlayConfig::GetConfigValue("shader_preset", "");
 }
 
 static void SetShaderPreset(const std::string &path)
 {
+    if (woplay_host::active()) {
+        woplay_host::setOptionJson("shader_preset", nlohmann::json(path).dump());
+        return;
+    }
     OverlayConfig::SetConfigValue("shader_preset", path);
     OverlayConfig::SaveConfig();
 }
@@ -766,7 +874,7 @@ static void OnShaderLoaded()
         return;
     g_chain->ResetParameters();
     const nlohmann::json overrides = ShaderParameterOverrides();
-    const auto it = overrides.find(ShaderPreset());
+    const auto it = overrides.find(woplay_host::active() ? woplay_host::shaderPreferenceKey() : ShaderPreset());
     if (it == overrides.end() || !it->is_object())
         return;
     for (const auto &param : it->items())
@@ -780,7 +888,8 @@ static void SetShaderParameter(const std::string &id, float value)
         return;
     g_chain->SetParameter(id, value);
     nlohmann::json overrides = ShaderParameterOverrides();
-    nlohmann::json &preset = overrides[ShaderPreset()];
+    const auto key = woplay_host::active() ? woplay_host::shaderPreferenceKey() : ShaderPreset();
+    nlohmann::json &preset = overrides[key];
     if (!preset.is_object())
         preset = nlohmann::json::object();
     for (const TicoSlang::Parameter &p : g_chain->Parameters())
@@ -794,7 +903,7 @@ static void SetShaderParameter(const std::string &id, float value)
             preset[id] = value;
     }
     if (preset.empty())
-        overrides.erase(ShaderPreset());
+        overrides.erase(key);
     SaveShaderParameterOverrides(overrides);
 }
 
@@ -803,7 +912,7 @@ static void ResetShaderParameters()
     if (g_chain)
         g_chain->ResetParameters();
     nlohmann::json overrides = ShaderParameterOverrides();
-    overrides.erase(ShaderPreset());
+    overrides.erase(woplay_host::active() ? woplay_host::shaderPreferenceKey() : ShaderPreset());
     SaveShaderParameterOverrides(overrides);
 }
 
@@ -827,7 +936,8 @@ static void RegisterShaderMenu()
     };
     callbacks.set_parameter = [](const std::string &id, float value) { SetShaderParameter(id, value); };
     callbacks.reset_parameters = [] { ResetShaderParameters(); };
-    OverlayUI::SetShaderCallbacks(std::move(callbacks));
+    if (woplay_host::active()) woplay_menu::shaders(std::move(callbacks));
+    else OverlayUI::SetShaderCallbacks(std::move(callbacks));
 }
 
 // Loads the preset the settings name once it differs from the active one.
@@ -835,15 +945,26 @@ static void RegisterShaderMenu()
 // toast instead of the screen just freezing.
 static void ApplyShaderPreset()
 {
-    const std::string wanted = ShaderPreset();
-    if (!g_chain || wanted == g_activePreset)
+    const std::string wanted = woplay_host::shaderEnabled() ? ShaderPreset() : std::string{};
+    if (!g_chain)
         return;
+    static std::uint64_t appliedRevision = 0;
+    static std::string failedPreset;
+    static std::uint64_t failedRevision = 0;
+    const auto revision = woplay_host::displayConfigRevision();
+    if (wanted == g_activePreset) {
+        if (woplay_host::active() && revision != appliedRevision) {
+            appliedRevision = revision;
+            OnShaderLoaded();
+        }
+        return;
+    }
+    if (woplay_host::active() && wanted == failedPreset && revision == failedRevision) return;
     static std::string announced;
     if (announced != wanted && !wanted.empty())
     {
         announced = wanted;
-        OverlayUI::ShowToast(SwitchFrontend::OverlayTranslation::tr("emulator_loading_shader"),
-                             OverlayUI::ToastCorner::TopRight);
+        CoreToast(CoreText("emulator_loading_shader"));
         return;
     }
     announced.clear();
@@ -851,14 +972,18 @@ static void ApplyShaderPreset()
     if (g_chain->LoadPreset(wanted, error))
     {
         g_activePreset = wanted;
+        appliedRevision = revision;
         OnShaderLoaded();
         return;
     }
     LOG_ERROR("SHADER", "Cannot load %s: %s", wanted.c_str(), error.c_str());
     const std::string firstLine = error.substr(0, error.find('\n'));
-    OverlayUI::ShowToast(SwitchFrontend::OverlayTranslation::tr("emulator_shader_failed") + ": " +
-                             firstLine.substr(0, 80),
-                         OverlayUI::ToastCorner::TopRight);
+    CoreToast(CoreText("emulator_shader_failed") + ": " + firstLine.substr(0, 80));
+    if (woplay_host::active()) {
+        failedPreset = wanted;
+        failedRevision = revision;
+        return;
+    }
     // Keep showing (and saving) what actually runs.
     if (g_activePreset == "\x01")
         g_activePreset.clear();
@@ -871,6 +996,11 @@ static void ApplySettingsToCore()
 {
     if (!g_core)
         return;
+    if (woplay_host::active()) {
+        for (const auto& [key, value] : woplay_host::nativeOptions(g_core->IsGameLoaded()))
+            g_core->SetOption(key, value);
+        return;
+    }
     OverlayConfig::ApplyToCore([](const std::string &key, const std::string &value) {
         g_core->SetOption(key, value);
     });
@@ -879,7 +1009,7 @@ static void ApplySettingsToCore()
 static std::string TrFormat(const char *key, int value)
 {
     SwitchFrontend::OverlayTranslation::TranslationManager::Instance().Init();
-    const std::string format = SwitchFrontend::OverlayTranslation::tr(key);
+    const std::string format = CoreText(key);
     char text[256];
     snprintf(text, sizeof(text), format.c_str(), value);
     return text;
@@ -897,12 +1027,14 @@ static void OpenMenu()
         return;
     }
     TicoCore::StopRumble(); // the game is paused
+    if (woplay_host::active()) woplay_host::pause();
     g_menuOpen = true;
     g_navHeldPrev = 0;
     g_navRepeatFrames = 0;
     OverlayUI::SetHardcoreMode(g_core && g_core->IsHardcoreActive());
     StopFastForward();
-    ImGuiOverlay::SetVisible(true);
+    if (woplay_host::active()) woplay_menu::visible(true);
+    else ImGuiOverlay::SetVisible(true);
 }
 
 static void CloseMenu()
@@ -910,7 +1042,11 @@ static void CloseMenu()
     if (!g_menuOpen)
         return;
     g_menuOpen = false;
-    ImGuiOverlay::SetVisible(false);
+    if (woplay_host::active()) {
+        g_waitGameInput = true;
+        woplay_menu::visible(false);
+        woplay_menu::input(nullptr);
+    } else ImGuiOverlay::SetVisible(false);
     if (g_core)
         g_core->ClearInputs();
 }
@@ -931,7 +1067,11 @@ static void FeedMenuTouch()
     if (hidGetTouchScreenStates(&state, 1) > 0 && state.count > 0)
         touch = {true, static_cast<float>(state.touches[0].x), static_cast<float>(state.touches[0].y)};
 #endif
-    ImGuiOverlay::FeedTouch(touch);
+    if (woplay_host::active()) {
+#ifdef __SWITCH__
+        woplay_menu::touch(touch);
+#endif
+    } else ImGuiOverlay::FeedTouch(touch);
 }
 
 static void FeedMenu(SDL_GameController *pad)
@@ -977,12 +1117,59 @@ static void FeedMenu(SDL_GameController *pad)
     cancelHeld = cancel;
 }
 
+static void RunWoPlayState(const woplay_host::StateRequest& request)
+{
+    using woplay_host::StateGroup;
+    using woplay_host::StateOperation;
+    if (!g_core) return;
+    try {
+        switch (request.operation) {
+        case StateOperation::Save: {
+            const int slot = WriteWoPlayState(request.group,request.slot);
+            CoreToast(TrFormat("已保存到槽位 %d",slot));
+            break;
+        }
+        case StateOperation::Load: {
+            if (g_core->IsHardcoreActive()) {
+                CoreToast(CoreText("emulator_hardcore_no_load"));
+                return;
+            }
+            const auto path = woplay_host::stateFile(request.group,request.slot);
+            if (path.empty()) {
+                CoreToast(CoreText(request.group == StateGroup::Cycle ? "没有循环存档" : "空槽位"));
+                return;
+            }
+            if (!g_core->LoadState(path)) {
+                CoreToast(CoreText("读取存档失败"));
+                return;
+            }
+            CoreToast(CoreText(request.group == StateGroup::Resume ? "emulator_auto_loaded" : "已读取存档"));
+            CloseMenu();
+            break;
+        }
+        case StateOperation::Delete:
+            woplay_host::deleteState(request.group,request.slot);
+            CoreToast(CoreText("存档已删除"));
+            break;
+        case StateOperation::Expand:
+            woplay_host::expandStates(request.group);
+            CoreToast(CoreText("已扩充档位"));
+            break;
+        }
+    } catch (const std::exception& error) {
+        LOG_ERROR("HOME", "Save state operation failed: %s",error.what());
+        CoreToast(CoreText(request.operation == StateOperation::Load ?
+                          "读取存档失败" : "保存失败，请重试"));
+    }
+}
+
 // Carries out what the menu chose on the last drawn frame.
 static void RunMenuAction()
 {
     using OverlayUI::Action;
-    const Action action = ImGuiOverlay::ConsumeAction();
-    if (OverlayUI::ConsumeSettingsChanged())
+    if (const auto request = woplay_menu::takeStateAction()) RunWoPlayState(*request);
+    const Action action = woplay_host::active() ? woplay_menu::takeAction() : ImGuiOverlay::ConsumeAction();
+    if (!woplay_host::active() && OverlayUI::ConsumeSettingsChanged())
         ApplySettingsToCore();
 
     switch (action)
@@ -1003,6 +1190,13 @@ static void RunMenuAction()
                 g_running = false;
             return;
         }
+        if (woplay_host::active() && g_core) {
+            if (!g_core->SavePersistent() || !AutoSaveState()) {
+                CoreToast(CoreText("保存失败，请重试"));
+                return;
+            }
+            g_woplayAutoSaved = true;
+        }
         CloseMenu();
         ChainloadTico();
         g_running = false;
@@ -1020,8 +1214,13 @@ static void RunMenuAction()
             const std::string path = g_core->GetGamePath();
             const std::string slug = TicoConfig::CURRENT_SLUG;
             const std::string title = g_titleArg;
+            if (woplay_host::active()) {
+                if (!g_core->SavePersistent() || !AutoSaveState()) {
+                    CoreToast(CoreText("保存失败，请重试"));
+                    return;
+                }
+            } else AutoSaveState();
             CloseMenu();
-            AutoSaveState();
             TicoVulkan::WaitIdle();
             g_core.reset();
             TicoCore::StopRumble();
@@ -1029,6 +1228,10 @@ static void RunMenuAction()
             AudioFlushCallback(); // nothing of the old session plays into the new one
             StartGame(slug, path, title);
             g_offerResume = false; // Restart means from the start
+            if (woplay_host::active() && (!g_core || !g_core->IsGameLoaded())) {
+                woplay_host::finish("ROM restart failed");
+                g_running = false;
+            }
         }
         return;
     default:
@@ -1041,8 +1244,8 @@ static void RunMenuAction()
         const bool saved = g_core->SaveState(StatePath(slot - 1));
         if (saved)
             SaveStatePicture(StatePath(slot - 1) + ".png");
-        OverlayUI::ShowToast(TrFormat(saved ? "emulator_state_saved" : "emulator_save_failed", slot));
-        CloseMenu();
+        CoreToast(TrFormat(saved ? "emulator_state_saved" : "emulator_save_failed", slot));
+        if (!woplay_host::active()) CloseMenu();
     }
     else if (OverlayUI::IsLoadStateAction(action) && g_core)
     {
@@ -1051,11 +1254,12 @@ static void RunMenuAction()
             OverlayUI::ShowToast(SwitchFrontend::OverlayTranslation::tr("emulator_hardcore_no_load"));
         else
         {
-            const bool loaded = g_core->LoadState(StatePath(slot - 1));
+            const bool loaded = g_core->LoadState(StatePath(slot - 1, true));
             if (loaded && slot == OverlayUI::kAutoStateSlot)
-                OverlayUI::ShowToast(SwitchFrontend::OverlayTranslation::tr("emulator_auto_loaded"));
+                CoreToast(CoreText("emulator_auto_loaded"));
             else
-                OverlayUI::ShowToast(TrFormat(loaded ? "emulator_state_loaded" : "emulator_load_failed", slot));
+                CoreToast(TrFormat(loaded ? "emulator_state_loaded" : "emulator_load_failed", slot));
+            if (woplay_host::active() && !loaded) return;
         }
         CloseMenu();
     }
@@ -1079,7 +1283,9 @@ static void UpdateHud(float deltaTime)
         stats.rendered_width = g_core->GetFrameWidth();
         stats.rendered_height = g_core->GetFrameHeight();
     }
-    OverlayUI::SetHudStats(stats);
+    if (woplay_host::active()) {
+        if (!g_menuOpen && g_core) woplay_menu::hud(stats.fps, stats.rendered_width, stats.rendered_height, stats.fast_forward);
+    } else OverlayUI::SetHudStats(stats);
 }
 
 // The game's on-screen rectangle, from the Display tab: Integer scales the
@@ -1097,6 +1303,38 @@ static ImVec4 ComputeGameRect(ImVec2 displaySize)
     const float baseH = height > 0 ? static_cast<float>(height) : 160.0f;
     float dstWidth = displaySize.x;
     float dstHeight = displaySize.y;
+    if (woplay_host::active()) {
+        const auto geometry = woplay_host::displayGeometry();
+        const auto fit = [&](float ar) {
+            dstWidth = std::min(displaySize.x,displaySize.y*ar);
+            dstHeight = dstWidth/ar;
+        };
+        float x = 0, y = 0;
+        if (geometry.mode == "integer") {
+            const auto maxScale = std::min(displaySize.x/baseW,displaySize.y/baseH);
+            const auto ratio = geometry.integer ? float(geometry.integer) : std::max(1.F,std::floor(maxScale));
+            dstWidth = baseW*std::min(ratio,maxScale);
+            dstHeight = baseH*std::min(ratio,maxScale);
+        } else if (geometry.mode == "original") {
+            dstWidth = baseW;
+            dstHeight = baseH;
+        } else if (geometry.mode != "fill") {
+            fit(geometry.mode == "four_three" ? 4.F/3 : geometry.mode == "wide" ? 16.F/9 :
+                aspectRatio > 0.F ? aspectRatio : baseW/baseH);
+            if (geometry.mode == "custom") {
+                const auto& frame = geometry.customFrame;
+                if (frame[2] > 0.F && frame[3] > 0.F)
+                    return {frame[0]*displaySize.x,frame[1]*displaySize.y,
+                            frame[2]*displaySize.x,frame[3]*displaySize.y};
+                dstWidth *= geometry.scale;
+                dstHeight *= geometry.scale;
+                x = geometry.offsetX*displaySize.x/1280.F;
+                y = geometry.offsetY*displaySize.y/720.F;
+            }
+        }
+        return {std::floor((displaySize.x-dstWidth)*.5F+x),std::floor((displaySize.y-dstHeight)*.5F+y),
+                std::floor(dstWidth),std::floor(dstHeight)};
+    }
     if (mode == "Integer")
     {
         int scale;
@@ -1135,19 +1373,23 @@ static ImVec4 ComputeGameRect(ImVec2 displaySize)
 }
 
 // Runs the shader chain at the game's on-screen size and draws its output.
-static void DrawGame(VkCommandBuffer cmd, ImDrawList *dl, ImVec2 displaySize)
+static ImVec4 DrawGame(VkCommandBuffer cmd, ImDrawList *dl, ImVec2 displaySize)
 {
     dl->AddRectFilled(ImVec2(0, 0), displaySize, IM_COL32(0, 0, 0, 255));
-    if (!g_core)
-        return; // the library: no game, and no stale frame behind it
-    const ImVec4 rect = ComputeGameRect(displaySize);
-    if (!g_chain || !cmd || rect.z < 1.0f || rect.w < 1.0f)
-        return;
-    const float ar = g_core ? g_core->GetAspectRatio() : 4.0f / 3.0f;
-    const ImTextureID tex = g_chain->Process(cmd, (uint32_t)rect.z, (uint32_t)rect.w, ar,
+    if (!g_core) return {}; // no stale frame in the library
+    const ImVec4 configured = ComputeGameRect(displaySize);
+    const ImVec4 rect = woplay_menu::previewFrame(displaySize).value_or(configured);
+    if (!g_chain || !cmd || rect.z < 1.0f || rect.w < 1.0f) return rect;
+    const float ar = g_core->GetAspectRatio();
+    // Resizing only scales the displayed quad. Rebuild the shader targets after confirmation.
+    const auto outputW = std::clamp(configured.z,1.F,displaySize.x);
+    const auto outputH = std::clamp(configured.w,1.F,displaySize.y);
+    const ImTextureID tex = g_chain->Process(cmd, (uint32_t)outputW, (uint32_t)outputH, ar,
                                              g_core ? g_core->GetFPS() : 60.0);
     if (tex != ImTextureID_Invalid)
         dl->AddImage(tex, ImVec2(rect.x, rect.y), ImVec2(rect.x + rect.z, rect.y + rect.w));
+    if (woplay_host::active()) woplay_menu::drawOverlay(*dl,displaySize);
+    return rect;
 }
 
 // Switch buttons by their Nintendo names, as the Controls tab spells them.
@@ -1549,7 +1791,7 @@ static void StartGame(const std::string &slug, const std::string &romArg, const 
     TicoConfig::MakeDirs(TicoConfig::SystemPath());
 
     // this game's own settings (Settings > This Game), if it has them, over the core's
-    OverlayConfig::SetGame(romPath);
+    if (!woplay_host::active()) OverlayConfig::SetGame(romPath);
     g_core = std::make_unique<TicoCore>();
     g_core->EnsureConfigLoaded();
     ApplySettingsToCore();
@@ -1576,6 +1818,7 @@ static void StartGame(const std::string &slug, const std::string &romArg, const 
         }
         return;
     }
+    if (woplay_host::active()) woplay_host::beginGame();
     g_pacedFps = 0.0; // UpdateFramePacing sets the audio rate for this game
     g_offerResume = true;
     if (g_core->ConsumeCheatsRecovered())
@@ -1632,7 +1875,43 @@ void HandleInput()
     }
 
     SDL_GameController *pad = numControllers > 0 ? controllers[0] : nullptr;
-    if (pad && g_overlayReady)
+    if (woplay_host::active()) {
+        const auto triggerMask = SwitchBit(SwitchButton::ZL) | SwitchBit(SwitchButton::ZR);
+        const auto held = pad ? SwitchButtonsHeld(pad) : 0;
+        const bool toggle = (held & triggerMask) == triggerMask;
+        if (toggle && !g_toggleHeld && g_core) {
+            if (g_menuOpen) CloseMenu();
+            else OpenMenu();
+        }
+        g_toggleHeld = toggle;
+        const auto xMask = SwitchBit(SwitchButton::X);
+        const auto leftStick = SwitchBit(SwitchButton::StickL);
+        const auto rightStick = SwitchBit(SwitchButton::StickR);
+        const auto shortcutMask = xMask | leftStick | rightStick;
+        const auto shortcut = held & shortcutMask;
+        const bool quickSave = !toggle && shortcut == (xMask | leftStick);
+        const bool quickLoad = !toggle && shortcut == (xMask | rightStick);
+        static bool quickHeld = false;
+        const bool quickPress = (quickSave || quickLoad) && !quickHeld;
+        quickHeld = quickSave || quickLoad;
+        if (g_menuOpen) {
+            FeedMenuTouch();
+            return;
+        }
+        if (g_waitGameInput) {
+            if (g_core) g_core->ClearInputs();
+            g_waitGameInput = (held & (triggerMask | shortcutMask | SwitchBit(SwitchButton::A) | SwitchBit(SwitchButton::B))) != 0;
+            return;
+        }
+        if (quickPress && g_core) {
+            using woplay_host::StateGroup;
+            using woplay_host::StateOperation;
+            g_core->ClearInputs();
+            RunWoPlayState({quickSave ? StateOperation::Save : StateOperation::Load,StateGroup::Cycle});
+            g_waitGameInput = true;
+            return;
+        }
+    } else if (pad && g_overlayReady)
     {
         // Guide, or Plus+Minus, opens the menu and closes it again.
         const bool start = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START);
@@ -1731,6 +2010,11 @@ void Render()
     ImGui::GetIO().DisplaySize = ImVec2((float)logW, (float)logH);
     ImGui::GetIO().DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
 #endif
+    if (woplay_host::active() && g_menuOpen) {
+        const auto pad = std::find_if(std::begin(g_controllers),std::end(g_controllers),
+                                      [](const auto* controller) { return controller != nullptr; });
+        woplay_menu::input(pad == std::end(g_controllers) ? nullptr : *pad);
+    }
     ImGui::NewFrame();
 
     int w, h;
@@ -1758,9 +2042,13 @@ void Render()
     }
 
     ApplyShaderPreset();
-    DrawGame(cmd, ImGui::GetBackgroundDrawList(), displaySize);
+    const auto gameFrame = DrawGame(cmd, ImGui::GetBackgroundDrawList(), displaySize);
     UpdateHud(ImGui::GetIO().DeltaTime);
-    ImGuiOverlay::Draw(g_core.get(), displaySize.x, displaySize.y, ImGui::GetIO().DeltaTime);
+    if (woplay_host::active())
+        woplay_menu::draw(g_core.get(),gameFrame);
+    else {
+        ImGuiOverlay::Draw(g_core.get(), displaySize.x, displaySize.y, ImGui::GetIO().DeltaTime);
+    }
 
     if (g_core && g_core->GetOSDFrames() > 0)
     {
@@ -1793,8 +2081,11 @@ void Render()
     }
 
     ImGui::Render();
-    if (cmd)
-        TicoVulkan::EndFrame(ImGui::GetDrawData());
+    if (cmd) {
+        auto* frame = ImGui::GetDrawData();
+        if (woplay_host::active()) woplay_menu::prepareEffects(cmd,*frame);
+        TicoVulkan::EndFrame(frame);
+    }
 }
 
 //==============================================================================
@@ -1803,8 +2094,18 @@ void Render()
 
 int main(int argc, char *argv[])
 {
-    // Mesa's shader cache beside this core's files, not at the SD card's root
-    tico::UseShaderCacheDir("sdmc:/tico/system/mgba/cache/mesa");
+    std::setlocale(LC_ALL, "");
+#ifdef WOPLAY_HOST
+    try {
+        woplay_host::initialize(argc, argv);
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "WoPlay startup: %s\n", error.what());
+        woplay_host::finish(error.what());
+        return 2;
+    }
+#endif
+    tico::UseShaderCacheDir(woplay_host::active() ? woplay_host::directory("cache") + "/mesa"
+                                                  : "sdmc:/tico/system/mgba/cache/mesa");
     Logger::Instance().ResetLogFile();
 
     g_running = true;
@@ -1848,6 +2149,7 @@ int main(int argc, char *argv[])
     {
         LOG_ERROR("HOME", "Failed to initialize window");
         Logger::Instance().CloseLogFile();
+        woplay_host::finish("Window initialization failed");
         return 1;
     }
     LOG_INFO("HOME", "InitWindow succeeded");
@@ -1862,6 +2164,7 @@ int main(int argc, char *argv[])
         LOG_ERROR("HOME", "Failed to initialize ImGui");
         CleanupWindow();
         Logger::Instance().CloseLogFile();
+        woplay_host::finish("Vulkan or UI initialization failed");
         return 1;
     }
     LOG_INFO("HOME", "InitImGui succeeded");
@@ -1876,15 +2179,23 @@ int main(int argc, char *argv[])
     g_lastOperationMode = 255;
 #endif
 
-    OverlayConfig::ReloadConfig();
-    MigrateShaderSetting();
+    if (!woplay_host::active()) {
+        OverlayConfig::ReloadConfig();
+        MigrateShaderSetting();
+    }
 
     if (!g_audio.Init(g_audioDevice))
     {
         LOG_WARN("HOME", "TicoAudio init failed");
     }
 
-    g_overlayReady = ImGuiOverlay::Init();
+    g_overlayReady = woplay_host::active() ? woplay_menu::initialize(ApplySettingsToCore) : ImGuiOverlay::Init();
+    std::string woplayError;
+    if (woplay_host::active() && !g_overlayReady) {
+        woplayError = "WoPlay menu initialization failed";
+        g_running = false;
+    }
+    if (!woplay_host::active()) {
     // Save/Load State show each slot's picture and when it was saved.
     static std::array<ImTextureID, 6> slotPictures{};
     OverlayUI::SetSlotPreviewCallback([](int slot) {
@@ -1933,13 +2244,22 @@ int main(int argc, char *argv[])
         struct stat st;
         return g_core && slot >= 1 && stat(StatePath(slot - 1).c_str(), &st) == 0;
     });
+        OverlayUI::ReloadSettings();
+    }
     RegisterShaderMenu();
-    OverlayUI::ReloadSettings();
 
     // tico launches with argv[1] = console slug, argv[2] = ROM path,
     // argv[3] = title. Without a ROM (e.g. from the homebrew menu) the library
     // lists the ROM folders instead.
-    if (argc >= 3 && strchr(argv[1], '/'))
+    if (woplay_host::active()) {
+        if (g_running && woplay_host::launchingGame()) {
+            StartGame(woplay_host::platform(), woplay_host::rom(), woplay_host::title());
+            if (!g_core || !g_core->IsGameLoaded()) {
+                g_running = false;
+                woplayError = "ROM load failed";
+            }
+        } else if (g_running) g_menuOpen = true;
+    } else if (argc >= 3 && strchr(argv[1], '/'))
     {
         // tico before {slug} in the launch line: argv[1] = ROM, argv[2] = title
         StartGame(SlugForRom(argv[1]), argv[1], argv[2] ? argv[2] : "");
@@ -1989,15 +2309,16 @@ int main(int argc, char *argv[])
     }
 
     LOG_INFO("HOME", "Starting cleanup...");
-    AutoSaveState();
+    if (!g_woplayAutoSaved) AutoSaveState();
     TicoVulkan::WaitIdle();
+    if (woplay_host::active()) woplay_menu::shutdown();
     OverlayUI::SetSlotOccupiedCallback(nullptr);
     OverlayUI::SetSlotPreviewCallback(nullptr);
     OverlayUI::SetCheatCallbacks(nullptr, nullptr);
     OverlayUI::SetShaderCallbacks({});
     OverlayUI::SetLibraryCallbacks({});
     OverlayUI::SetLibraryFolderCallbacks({});
-    ImGuiOverlay::Shutdown();
+    if (!woplay_host::active()) ImGuiOverlay::Shutdown();
     g_core.reset();
     TicoCore::StopRumble();
 
@@ -2010,6 +2331,7 @@ int main(int argc, char *argv[])
     }
 
     CleanupWindow();
+    if (woplay_host::active()) woplay_host::finish(woplayError);
 
 #ifdef __SWITCH__
     UsbStorage::Shutdown(); // flush and unmount before tico takes over again
@@ -2021,5 +2343,5 @@ int main(int argc, char *argv[])
     LOG_INFO("HOME", "Clean exit");
     Logger::Instance().CloseLogFile();
 
-    exit(0);
+    return woplayError.empty() ? 0 : 1;
 }

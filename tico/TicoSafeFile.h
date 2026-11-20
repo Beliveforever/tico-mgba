@@ -95,9 +95,15 @@ inline bool Write(const std::string &path, const void *data, size_t size, int ke
         remove(tmp.c_str()); // the old file is untouched
         return false;
     }
-    if (Exists(path))
+    const bool had = Exists(path);
+    if (had)
         Rotate(path, keep);
-    return rename(tmp.c_str(), path.c_str()) == 0;
+    if (rename(tmp.c_str(), path.c_str()) == 0)
+        return true;
+    if (had && keep > 0 && !Exists(path))
+        rename(BackupPath(path, 1).c_str(), path.c_str());
+    remove(tmp.c_str());
+    return false;
 }
 
 /// Copies @p path into its backups (for a file the core keeps open and writes

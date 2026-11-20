@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 
 #include <json.hpp>
+#include "../../gbastation/session_host.hpp"
 
 #include "TicoLogger.h"
 
@@ -621,6 +622,7 @@ bool DarkMode() {
 }
 
 std::string ResumeOnLaunch() {
+    if (woplay_host::active()) return woplay_host::resumePolicy();
     std::string content;
     if (!tico::ReadSettings("general", content)) {
         return "ask";
@@ -646,6 +648,7 @@ bool QuickMenuTip() {
 }
 
 std::string GetConfigValue(std::string_view key, std::string_view default_value) {
+    if (woplay_host::active()) return woplay_host::option(key, default_value);
     return GetManager().GetConfigValue(key, default_value);
 }
 
@@ -654,14 +657,17 @@ void SetConfigValue(const std::string& key, const std::string& value) {
 }
 
 bool SaveConfig() {
+    if (woplay_host::active()) return true;
     return GetManager().SaveConfig();
 }
 
 std::string GetConfigJson(std::string_view key) {
+    if (woplay_host::active()) return woplay_host::optionJson(key);
     return GetManager().GetConfigJson(key);
 }
 
 void SetConfigJson(const std::string& key, const std::string& json_text) {
+    if (woplay_host::active()) { woplay_host::setOptionJson(key, json_text); return; }
     GetManager().SetConfigJson(key, json_text);
 }
 

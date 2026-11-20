@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "imgui.h"
+#ifndef WOPLAY_HOST
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #include "deps/stb/stb_image.h"
 // nanosvg is implemented in ra_alerts.cpp
 #include "deps/nanosvg/nanosvg.h"

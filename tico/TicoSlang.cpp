@@ -2,6 +2,7 @@
 /// @brief Slang preset parsing, preprocessing, compilation and reflection.
 
 #include "TicoSlang.h"
+#include "../gbastation/session_host.hpp"
 #include "TicoLogger.h"
 
 #include <glslang/Public/ResourceLimits.h>
@@ -498,7 +499,7 @@ std::string CachePath(const ShaderSource &source)
     h = Fnv1a(std::string(1, '\0') + source.fragment, h);
     char name[40];
     snprintf(name, sizeof(name), "%016llx.spv", (unsigned long long)h);
-    return std::string(kCacheDir) + name;
+    return (woplay_host::active() ? woplay_host::directory("cache") + "/shaders/" : kCacheDir) + name;
 }
 
 bool ReadCache(const std::string &path, CompiledPass &out)
@@ -516,7 +517,7 @@ bool ReadCache(const std::string &path, CompiledPass &out)
 void WriteCache(const std::string &path, const CompiledPass &in)
 {
     // Create the directory chain; failures just mean no caching.
-    std::string dir = kCacheDir;
+    const std::string dir = woplay_host::active() ? woplay_host::directory("cache") + "/shaders/" : kCacheDir;
     for (size_t at = dir.find('/', dir.find(":/") != std::string::npos ? dir.find(":/") + 2 : 1);
          at != std::string::npos; at = dir.find('/', at + 1))
         mkdir(dir.substr(0, at).c_str(), 0777);

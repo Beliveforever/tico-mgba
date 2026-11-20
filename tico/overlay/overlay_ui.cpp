@@ -22,7 +22,9 @@
 #include <utility>
 #include <vector>
 
+#ifdef __SWITCH__
 #include <switch.h>
+#endif
 
 #include <imgui.h>
 
@@ -1829,11 +1831,16 @@ void RenderStatusBar(ImDrawList* dl, ImVec2 display_size, float ease) {
     if (localtime_r(&now, &local_tm))
         std::strftime(time_str, sizeof(time_str), "%H:%M", &local_tm);
 
+#ifdef __SWITCH__
     u32 battery_level = 0;
     const bool has_battery = psmGetBatteryChargePercentage(&battery_level) == 0;
     PsmChargerType charger_type = PsmChargerType_Unconnected;
     const bool charging =
         psmGetChargerType(&charger_type) == 0 && charger_type != PsmChargerType_Unconnected;
+#else
+    const unsigned battery_level = 0;
+    const bool has_battery = false, charging = false;
+#endif
 
     float total_width = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, time_str).x;
     if (has_battery) {

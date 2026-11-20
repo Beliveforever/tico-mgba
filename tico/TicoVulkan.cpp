@@ -96,12 +96,28 @@ bool CreateInstance()
     std::vector<const char *> extensions = {VK_KHR_SURFACE_EXTENSION_NAME,
                                             VK_NN_VI_SURFACE_EXTENSION_NAME};
 #else
+#if defined(__APPLE__) && defined(WOPLAY_HOST)
+    const auto proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
+    if (!proc) return false;
+    volkInitializeCustom(proc);
+#else
     if (!Check(volkInitialize(), "volkInitialize"))
         return false;
+#endif
     unsigned count = 0;
     SDL_Vulkan_GetInstanceExtensions(s_window, &count, nullptr);
     std::vector<const char *> extensions(count);
     SDL_Vulkan_GetInstanceExtensions(s_window, &count, extensions.data());
+#if defined(__APPLE__) && defined(WOPLAY_HOST)
+    uint32_t availableCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &availableCount, nullptr);
+    std::vector<VkExtensionProperties> available(availableCount);
+    vkEnumerateInstanceExtensionProperties(nullptr, &availableCount, available.data());
+    const bool portability = std::any_of(available.begin(), available.end(), [](const auto& extension) {
+        return std::strcmp(extension.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0;
+    });
+    if (portability) extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
 #endif
 
     VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -110,6 +126,9 @@ bool CreateInstance()
     app.apiVersion = VK_API_VERSION_1_1;
 
     VkInstanceCreateInfo ci = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+#if defined(__APPLE__) && defined(WOPLAY_HOST)
+    if (portability) ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     ci.pApplicationInfo = &app;
     ci.enabledExtensionCount = (uint32_t)extensions.size();
     ci.ppEnabledExtensionNames = extensions.data();
@@ -195,12 +214,21 @@ bool CreateDevice()
     qci.queueCount = 1;
     qci.pQueuePriorities = &priority;
 
-    const char *extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    std::vector<const char*> extensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+#if defined(__APPLE__) && defined(WOPLAY_HOST)
+    uint32_t deviceExtensionCount = 0;
+    vkEnumerateDeviceExtensionProperties(s_ctx.gpu, nullptr, &deviceExtensionCount, nullptr);
+    std::vector<VkExtensionProperties> available(deviceExtensionCount);
+    vkEnumerateDeviceExtensionProperties(s_ctx.gpu, nullptr, &deviceExtensionCount, available.data());
+    for (const auto& extension : available)
+        if (std::strcmp(extension.extensionName, "VK_KHR_portability_subset") == 0)
+            extensions.push_back("VK_KHR_portability_subset");
+#endif
     VkDeviceCreateInfo ci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     ci.queueCreateInfoCount = 1;
     ci.pQueueCreateInfos = &qci;
-    ci.enabledExtensionCount = 1;
-    ci.ppEnabledExtensionNames = extensions;
+    ci.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    ci.ppEnabledExtensionNames = extensions.data();
     if (!Check(vkCreateDevice(s_ctx.gpu, &ci, nullptr, &s_ctx.device), "vkCreateDevice"))
         return false;
 #ifndef __SWITCH__
@@ -439,6 +467,10 @@ bool InitImGui()
     info.DescriptorPoolSize = 256;
     info.MinImageCount = (uint32_t)std::max<size_t>(2, s_swapImages.size());
     info.ImageCount = (uint32_t)s_swapImages.size();
+#ifdef WOPLAY_HOST
+    // Each paused frame renders the shared background once more into the glass backdrop.
+    info.ImageCount = std::max(info.ImageCount,2*kFramesInFlight);
+#endif
     info.PipelineInfoMain.RenderPass = s_swapRenderPass;
     info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     if (!ImGui_ImplVulkan_Init(&info))
@@ -530,6 +562,10 @@ void WaitIdle()
     if (s_ctx.device)
         vkDeviceWaitIdle(s_ctx.device);
 }
+
+VkRenderPass SwapRenderPass() { return s_swapRenderPass; }
+VkFormat SwapFormat() { return s_swapFormat; }
+
 
 //==============================================================================
 // Frame loop
