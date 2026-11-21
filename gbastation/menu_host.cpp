@@ -3,13 +3,18 @@
 #include "session_host.hpp"
 #include "session_data.hpp"
 #include "TicoCore.h"
+#include "TicoUtils.h"
 #include "TicoVulkan.h"
 #include "woplay/menus/core_menu.hpp"
 #include <SDL.h>
 #include <algorithm>
 #include <ctime>
 #include <map>
+#include <sstream>
 #include <sys/stat.h>
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
 
 namespace woplay_menu {
 namespace {
@@ -87,7 +92,9 @@ rendering::TextureHandle upload(const resources::Image& image) {
 }
 
 StateGroup groupFor(menus::SlotGroup group) {
-    return group == menus::SlotGroup::Cycle ? StateGroup::Cycle : StateGroup::Manual;
+    if(group==menus::SlotGroup::Cycle)return StateGroup::Cycle;
+    if(group==menus::SlotGroup::Auto)return StateGroup::Resume;
+    return StateGroup::Manual;
 }
 
 rendering::TextureHandle picture(const std::string& path) {
@@ -100,10 +107,15 @@ menus::StateSlot slotPreview(menus::SlotGroup group, int slot) {
     const auto kind = groupFor(group);
     const auto state = woplay_host::savedStates().entry(kind,slot);
     auto& cache = previews[{kind,slot}];
-    if (cache.path == state.file) return cache.entry;
+    const auto name=woplay_host::savedStates().name(kind,slot);
+    if (cache.path == state.file) {
+        cache.entry.name=name;
+        return cache.entry;
+    }
     textures.destroyTexture(cache.texture);
     cache.path = state.file;
     cache.entry = {};
+    cache.entry.name=name;
     if (!state.file.empty()) {
         cache.entry.occupied = true;
         cache.entry.savedAt = translate("已保存");
@@ -256,6 +268,25 @@ bool initialize(std::function<void()> settingsChanged) {
             try { return slotPreview(group,slot); }
             catch (const std::exception&) { return menus::StateSlot{}; }
         };
+        actions.renameState=[](menus::SlotGroup group,int slot,const std::string& name){
+            try{woplay_host::renameState(groupFor(group),slot,name);}
+            catch(const std::exception& error){notify(error.what());}
+        };
+#ifdef __SWITCH__
+        actions.textInput=[](const std::string& title,const std::string& initial,int limit)->std::optional<std::string>{
+            SwkbdConfig keyboard{};
+            if(R_FAILED(swkbdCreate(&keyboard,0)))return {};
+            swkbdConfigMakePresetDefault(&keyboard);
+            swkbdConfigSetHeaderText(&keyboard,title.c_str());
+            swkbdConfigSetInitialText(&keyboard,initial.c_str());
+            swkbdConfigSetStringLenMax(&keyboard,std::min(limit,500));
+            char buffer[2048]{};
+            const auto result=swkbdShow(&keyboard,buffer,sizeof(buffer));
+            swkbdClose(&keyboard);
+            if(R_FAILED(result))return {};
+            return std::string(buffer);
+        };
+#endif
         actions.displaySetting = woplay_host::displaySetting;
         actions.displayPreferences = woplay_host::displayPreferences;
         if (woplay_host::launchingGame()) actions.setDisplayScope = [](bool independent) {
@@ -292,11 +323,78 @@ bool initialize(std::function<void()> settingsChanged) {
         };
         actions.cheats = [] {
             std::vector<menus::CheatEntry> entries;
-            if (running)
-                for (const auto& entry : running->GetCheats()) entries.push_back({entry.name, entry.enabled});
+            if (running&&!running->IsHardcoreActive())
+                for (const auto& entry : running->GetCheats()){
+                    std::string codes;
+                    for(const auto& line:entry.codes){if(!codes.empty())codes+='\n';codes+=line;}
+                    entries.push_back({entry.name,entry.enabled,std::move(codes),entry.pinned});
+                }
             return entries;
         };
         actions.toggleCheat = [](int index) { if (running) running->ToggleCheat(index); };
+        actions.cheatFile=[]{
+            if(!running||running->IsHardcoreActive())return std::string{};
+            const auto file=woplay_host::cheatsFile(".cheats");
+            return fs::is_regular_file(fs::symlink_status(file))?file:std::string{};
+        };
+        actions.openCheatFile=[](const std::string& path){
+            try{
+                if(!running||running->IsHardcoreActive())throw std::runtime_error("金手指不可用");
+                running->OpenCheats(path);
+                return true;
+            }catch(const std::exception& error){notify(error.what());return false;}
+        };
+        actions.editCheat=[](int index,const std::string& name,const std::string& codes){
+            try{
+                if(!running||running->IsHardcoreActive())return false;
+                const auto title=TicoUtils::Trim(name);
+                if(title.empty()||title.find_first_of("\r\n")!=std::string::npos)
+                    throw std::runtime_error("请输入金手指名称");
+                std::string separated=codes;
+                std::replace(separated.begin(),separated.end(),'+','\n');
+                std::istringstream stream(separated);
+                std::vector<std::string> lines;
+                for(std::string line;std::getline(stream,line);){
+                    line=TicoUtils::Trim(line);
+                    if(line.find_first_not_of("0123456789ABCDEFabcdef:- \t")!=std::string::npos)
+                        throw std::runtime_error("金手指内容应为十六进制代码");
+                    if(!line.empty())lines.push_back(std::move(line));
+                }
+                if(lines.empty())throw std::runtime_error("请输入金手指内容");
+                auto entries=running->GetCheats();
+                if(index<0){index=static_cast<int>(entries.size());entries.emplace_back();}
+                auto& entry=entries.at(index);
+                entry.name=title;entry.codes=std::move(lines);
+                running->SaveCheats(std::move(entries));
+                return true;
+            }catch(const std::exception& error){notify(error.what());return false;}
+        };
+        actions.pinCheat=[](int index){
+            try{
+                if(!running||running->IsHardcoreActive())return false;
+                auto entries=running->GetCheats();
+                auto& entry=entries.at(index);
+                entry.pinned=!entry.pinned;
+                running->SaveCheats(std::move(entries));
+                return true;
+            }catch(const std::exception& error){notify(error.what());return false;}
+        };
+        actions.deleteCheat=[](int index){
+            try{
+                if(!running||running->IsHardcoreActive())return false;
+                auto entries=running->GetCheats();
+                if(index<0||index>=static_cast<int>(entries.size()))return false;
+                entries.erase(entries.begin()+index);
+                running->SaveCheats(std::move(entries));
+                return true;
+            }catch(const std::exception& error){notify(error.what());return false;}
+        };
+        actions.readMemory=[]{
+            std::vector<menus::MemoryRegion> regions;
+            if(running)for(auto& [base,bytes]:running->SearchableMemory())
+                regions.push_back({base,std::move(bytes)});
+            return regions;
+        };
         actions.shaderPresets = presets;
         actions.shaderPresetPath = woplay_host::configuredShaderPath;
         actions.setShaderPreset = [](const std::string& path) { if (shader.select) shader.select(path); };
@@ -409,22 +507,40 @@ void input(SDL_GameController* pad) {
     }
     const auto x = pad ? SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX) : 0;
     const auto y = pad ? SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY) : 0;
-    key(ImGuiKey_GamepadDpadUp, SDL_CONTROLLER_BUTTON_DPAD_UP, y < -16000);
-    key(ImGuiKey_GamepadDpadDown, SDL_CONTROLLER_BUTTON_DPAD_DOWN, y > 16000);
-    key(ImGuiKey_GamepadDpadLeft, SDL_CONTROLLER_BUTTON_DPAD_LEFT, x < -16000);
-    key(ImGuiKey_GamepadDpadRight, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, x > 16000);
+    const bool capture=bindingActive();
+    key(ImGuiKey_GamepadDpadUp, SDL_CONTROLLER_BUTTON_DPAD_UP, !capture&&y < -16000);
+    key(ImGuiKey_GamepadDpadDown, SDL_CONTROLLER_BUTTON_DPAD_DOWN, !capture&&y > 16000);
+    key(ImGuiKey_GamepadDpadLeft, SDL_CONTROLLER_BUTTON_DPAD_LEFT, !capture&&x < -16000);
+    key(ImGuiKey_GamepadDpadRight, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, !capture&&x > 16000);
+    const bool nintendo=
 #ifdef __SWITCH__
-    key(ImGuiKey_GamepadFaceDown, SDL_CONTROLLER_BUTTON_B);
-    key(ImGuiKey_GamepadFaceRight, SDL_CONTROLLER_BUTTON_A);
-    key(ImGuiKey_GamepadFaceUp, SDL_CONTROLLER_BUTTON_Y);
+        true;
 #else
-    key(ImGuiKey_GamepadFaceDown, SDL_CONTROLLER_BUTTON_A);
-    key(ImGuiKey_GamepadFaceRight, SDL_CONTROLLER_BUTTON_B);
-    key(ImGuiKey_GamepadFaceUp, SDL_CONTROLLER_BUTTON_Y);
+        capture;
 #endif
+    key(ImGuiKey_GamepadFaceDown,nintendo?SDL_CONTROLLER_BUTTON_B:SDL_CONTROLLER_BUTTON_A);
+    key(ImGuiKey_GamepadFaceRight,nintendo?SDL_CONTROLLER_BUTTON_A:SDL_CONTROLLER_BUTTON_B);
+    key(ImGuiKey_GamepadFaceUp,SDL_CONTROLLER_BUTTON_Y);
+    key(ImGuiKey_GamepadFaceLeft,SDL_CONTROLLER_BUTTON_X);
     key(ImGuiKey_GamepadL1, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
     key(ImGuiKey_GamepadR1, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+    key(ImGuiKey_GamepadL3,SDL_CONTROLLER_BUTTON_LEFTSTICK);
+    key(ImGuiKey_GamepadR3,SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+    key(ImGuiKey_GamepadStart,SDL_CONTROLLER_BUTTON_START);
+    key(ImGuiKey_GamepadBack,SDL_CONTROLLER_BUTTON_BACK);
+    const auto axis=[&](SDL_GameControllerAxis line){return pad?SDL_GameControllerGetAxis(pad,line):0;};
+    io.AddKeyEvent(ImGuiKey_GamepadL2,axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT)>16000);
+    io.AddKeyEvent(ImGuiKey_GamepadR2,axis(SDL_CONTROLLER_AXIS_TRIGGERRIGHT)>16000);
+    io.AddKeyEvent(ImGuiKey_GamepadLStickUp,capture&&y<-16000);
+    io.AddKeyEvent(ImGuiKey_GamepadLStickDown,capture&&y>16000);
+    io.AddKeyEvent(ImGuiKey_GamepadLStickLeft,capture&&x<-16000);
+    io.AddKeyEvent(ImGuiKey_GamepadLStickRight,capture&&x>16000);
+    io.AddKeyEvent(ImGuiKey_GamepadRStickUp,capture&&axis(SDL_CONTROLLER_AXIS_RIGHTY)<-16000);
+    io.AddKeyEvent(ImGuiKey_GamepadRStickDown,capture&&axis(SDL_CONTROLLER_AXIS_RIGHTY)>16000);
+    io.AddKeyEvent(ImGuiKey_GamepadRStickLeft,capture&&axis(SDL_CONTROLLER_AXIS_RIGHTX)<-16000);
+    io.AddKeyEvent(ImGuiKey_GamepadRStickRight,capture&&axis(SDL_CONTROLLER_AXIS_RIGHTX)>16000);
 }
+bool bindingActive() { return menu&&menu->bindingActive(); }
 void touch(const SwitchFrontend::OverlayUI::TouchInput& input) {
     if (gamePointer({input.x,input.y},input.down)) return;
     auto& io = ImGui::GetIO();

@@ -5,6 +5,9 @@
 #include "TicoCore.h"
 #include "../gbastation/session_host.hpp"
 #include "../gbastation/menu_host.hpp"
+#ifdef WOPLAY_HOST
+#include "woplay/ui_components/binding_capture.hpp"
+#endif
 #include <clocale>
 #include "TicoSession.h"
 #include "TicoSafeFile.h"
@@ -541,14 +544,19 @@ void ProcessEvents()
                 woplay_menu::gamePointer({},false);
         }
         if (!framingInput) ImGui_ImplSDL2_ProcessEvent(&event);
-        // The save slot shortcut uses the physical key even with a different keyboard layout.
-        if (woplay_host::active() && (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) &&
-            event.key.keysym.scancode == SDL_SCANCODE_X)
-            ImGui::GetIO().AddKeyEvent(ImGuiKey_X,event.type == SDL_KEYDOWN);
+        // Menu shortcuts use physical X/Y on keyboard layouts that do not report Latin symbols.
+        if (woplay_host::active() && (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP)) {
+            if(event.key.keysym.scancode==SDL_SCANCODE_X)
+                ImGui::GetIO().AddKeyEvent(ImGuiKey_X,event.type==SDL_KEYDOWN);
+            if(event.key.keysym.scancode==SDL_SCANCODE_Y)
+                ImGui::GetIO().AddKeyEvent(ImGuiKey_Y,event.type==SDL_KEYDOWN);
+            if(event.key.keysym.scancode==SDL_SCANCODE_ESCAPE)
+                ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,event.type==SDL_KEYDOWN);
+        }
 #endif
 
         if (woplay_host::active() && g_core && event.type == SDL_KEYDOWN && !event.key.repeat &&
-            event.key.keysym.scancode == SDL_SCANCODE_F1) {
+            event.key.keysym.scancode == SDL_SCANCODE_F1 && !woplay_menu::bindingActive()) {
             if (g_menuOpen) CloseMenu();
             else OpenMenu();
         }
@@ -1395,7 +1403,8 @@ static ImVec4 DrawGame(VkCommandBuffer cmd, ImDrawList *dl, ImVec2 displaySize)
 // Switch buttons by their Nintendo names, as the Controls tab spells them.
 enum class SwitchButton
 {
-    A, B, X, Y, L, R, ZL, ZR, Plus, Minus, StickL, StickR, Up, Down, Left, Right, Count
+    A, B, X, Y, L, R, ZL, ZR, Plus, Minus, StickL, StickR, Up, Down, Left, Right,
+    LStickUp, LStickDown, LStickLeft, LStickRight, RStickUp, RStickDown, RStickLeft, RStickRight, Count
 };
 
 static constexpr uint32_t SwitchBit(SwitchButton button)
@@ -1403,7 +1412,7 @@ static constexpr uint32_t SwitchBit(SwitchButton button)
     return 1u << static_cast<unsigned>(button);
 }
 
-static uint32_t SwitchBitFor(const std::string &name)
+static uint32_t SwitchBitFor(std::string_view name)
 {
     static const std::pair<const char *, SwitchButton> kNames[] = {
         {"A", SwitchButton::A}, {"B", SwitchButton::B}, {"X", SwitchButton::X},
@@ -1413,6 +1422,10 @@ static uint32_t SwitchBitFor(const std::string &name)
         {"StickR", SwitchButton::StickR}, {"Up", SwitchButton::Up},
         {"Down", SwitchButton::Down}, {"Left", SwitchButton::Left},
         {"Right", SwitchButton::Right},
+        {"LStickUp",SwitchButton::LStickUp},{"LStickDown",SwitchButton::LStickDown},
+        {"LStickLeft",SwitchButton::LStickLeft},{"LStickRight",SwitchButton::LStickRight},
+        {"RStickUp",SwitchButton::RStickUp},{"RStickDown",SwitchButton::RStickDown},
+        {"RStickLeft",SwitchButton::RStickLeft},{"RStickRight",SwitchButton::RStickRight},
     };
     for (const auto &entry : kNames)
         if (name == entry.first)
@@ -1453,7 +1466,38 @@ static uint32_t SwitchButtonsHeld(SDL_GameController *pad)
         held |= SwitchBit(SwitchButton::ZL);
     if (SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000)
         held |= SwitchBit(SwitchButton::ZR);
+    const auto stick=[&](SDL_GameControllerAxis x,SDL_GameControllerAxis y,SwitchButton up,SwitchButton down,
+                         SwitchButton left,SwitchButton right){
+        const auto horizontal=SDL_GameControllerGetAxis(pad,x),vertical=SDL_GameControllerGetAxis(pad,y);
+        if(vertical<-16000)held|=SwitchBit(up);
+        if(vertical>16000)held|=SwitchBit(down);
+        if(horizontal<-16000)held|=SwitchBit(left);
+        if(horizontal>16000)held|=SwitchBit(right);
+    };
+    stick(SDL_CONTROLLER_AXIS_LEFTX,SDL_CONTROLLER_AXIS_LEFTY,SwitchButton::LStickUp,SwitchButton::LStickDown,
+          SwitchButton::LStickLeft,SwitchButton::LStickRight);
+    stick(SDL_CONTROLLER_AXIS_RIGHTX,SDL_CONTROLLER_AXIS_RIGHTY,SwitchButton::RStickUp,SwitchButton::RStickDown,
+          SwitchButton::RStickLeft,SwitchButton::RStickRight);
     return held;
+}
+
+static bool MappingHeld(const std::string& value,uint32_t held,bool keyboard,uint32_t* used=nullptr)
+{
+#ifdef WOPLAY_HOST
+    if(woplay_host::active()){
+        uint32_t mask=0;
+        const bool down=gbastation::ui::bindingHeld(value,[&](std::string_view token){
+            const auto button=SwitchBitFor(token);
+            mask|=button;
+            return button ? (held&button)!=0 : keyboard&&gbastation::ui::keyboardBindingDown(token);
+        });
+        if(used)*used=down?mask:0;
+        return down;
+    }
+#endif
+    const auto bit=SwitchBitFor(value);
+    if(used)*used=bit;
+    return (held&bit)!=0;
 }
 
 // GBA (and Game Boy) buttons, with the Switch button each sits on by default:
@@ -1481,8 +1525,9 @@ static const ButtonMapping kButtonMappings[] = {
 // Switch button (0 when there is none), which then stays out of the game.
 static uint32_t UpdateFastForward(SDL_GameController *pad)
 {
-    const uint32_t button = SwitchBitFor(OverlayConfig::GetConfigValue("fast_forward_hotkey", "ZR"));
-    const bool down = pad && button && (SwitchButtonsHeld(pad) & button);
+    uint32_t button=0;
+    const bool down=MappingHeld(OverlayConfig::GetConfigValue("fast_forward_hotkey","ZR"),
+                                pad?SwitchButtonsHeld(pad):0,true,&button);
     bool active;
     if (OverlayConfig::GetConfigValue("fast_forward_mode", "hold") == "toggle")
     {
@@ -1879,7 +1924,7 @@ void HandleInput()
         const auto triggerMask = SwitchBit(SwitchButton::ZL) | SwitchBit(SwitchButton::ZR);
         const auto held = pad ? SwitchButtonsHeld(pad) : 0;
         const bool toggle = (held & triggerMask) == triggerMask;
-        if (toggle && !g_toggleHeld && g_core) {
+        if (toggle && !g_toggleHeld && g_core && !woplay_menu::bindingActive()) {
             if (g_menuOpen) CloseMenu();
             else OpenMenu();
         }
@@ -1949,15 +1994,14 @@ void HandleInput()
         const uint32_t ffButton = UpdateFastForward(numControllers > 0 ? controllers[0] : nullptr);
         const bool analogDpad = OverlayConfig::GetConfigValue("analog_dpad", "enabled") != "disabled";
 
-        for (int p = 0; p < numControllers; p++)
+        for (int p=0; p<std::max(woplay_host::active()?1:0,numControllers); ++p)
         {
-            SDL_GameController *controller = controllers[p];
-            if (!controller) continue;
-
-            uint32_t held = SwitchButtonsHeld(controller);
+            SDL_GameController *controller=p<numControllers?controllers[p]:nullptr;
+            if(!controller&&p>0)continue;
+            uint32_t held=controller?SwitchButtonsHeld(controller):0;
             if (p == 0)
                 held &= ~ffButton;
-            if (analogDpad)
+            if (analogDpad && controller)
             {
                 const int16_t leftX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
                 const int16_t leftY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
@@ -1970,9 +2014,8 @@ void HandleInput()
             // Controls > Button mapping: each GBA button on its Switch button.
             for (const ButtonMapping &mapping : kButtonMappings)
             {
-                const uint32_t bit =
-                    SwitchBitFor(OverlayConfig::GetConfigValue(mapping.key, mapping.fallback));
-                g_core->SetInputState(p, mapping.retroId, (held & bit) != 0);
+                g_core->SetInputState(p,mapping.retroId,
+                    MappingHeld(OverlayConfig::GetConfigValue(mapping.key,mapping.fallback),held,p==0));
             }
         }
     }

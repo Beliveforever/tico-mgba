@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <optional>
 #ifdef __SWITCH__
 #include <switch.h>
@@ -209,20 +210,62 @@ StateStore& stateStore() {
 
 const StateStore& savedStates() { return stateStore(); }
 std::string stateFile(StateGroup group, int slot) {
-    return stateStore().entry(group, group == StateGroup::Cycle ? 0 : slot).file.string();
+    return stateStore().entry(group,slot).file.string();
 }
 int saveState(StateGroup group, int slot, const StateStore::Writer& write) {
     return stateStore().save(group, slot, write);
 }
 void deleteState(StateGroup group, int slot) { stateStore().erase(group, slot); }
 void expandStates(StateGroup group) { stateStore().expand(group); }
+void renameState(StateGroup group,int slot,const std::string& name) { stateStore().rename(group,slot,name); }
 std::string gameIcon() { return iconPath; }
 std::string playerAvatar() { return avatarPath; }
 std::uint64_t sessionSeconds() { return static_cast<std::uint64_t>(sessionElapsed); }
 
 std::string cheatsFile(const char* extension) {
-    if (std::string_view(extension) == ".cheats") return emulation::libraryCheatFile(root,system,uuid).string();
+    if (std::string_view(extension) == ".cheats") {
+        const auto base=root/"library/cheats"/system;
+        const auto setting=gameOverrides.find("cheatFile");
+        const auto value=setting!=gameOverrides.end()&&setting->is_string()?setting->get<std::string>():std::string{};
+        if(!value.empty()){
+            const auto selected=(base/fs::path(value)).lexically_normal();
+            if(emulation::insideDirectory(selected,base)&&fs::is_regular_file(fs::symlink_status(selected)))
+                return selected.string();
+        }
+        return emulation::libraryCheatFile(root,system,uuid).string();
+    }
     return (dataRoot/"cache/cheats"/system/(uuid+extension)).string();
+}
+
+std::string chooseCheatFile(const std::string& source) {
+    if(!launchingGame())throw std::runtime_error("No active game");
+    const auto base=root/"library/cheats"/system;
+    const auto directory=base/uuid;
+    const fs::path input=source;
+    const auto name=input.empty()?fs::path(romPath).stem().string()+".cht":input.filename().string();
+    auto destination=directory/name;
+    if(name.empty()||!emulation::insideDirectory(directory,base)||
+       !emulation::insideDirectory(destination,directory))
+        throw std::runtime_error("Invalid cheat file location");
+    if(!input.empty()&&!fs::is_regular_file(fs::symlink_status(input)))
+        throw std::runtime_error("Cheat file is unavailable");
+    fs::create_directories(directory);
+    if(!input.empty()&&!emulation::insideDirectory(input,directory)){
+        const fs::path filename=name;
+        for(int i=2;fs::exists(destination);++i)
+            destination=directory/(filename.stem().string()+"-"+std::to_string(i)+filename.extension().string());
+        fs::copy_file(input,destination);
+    }else if(!input.empty()){
+        destination=input;
+    }else if(!fs::exists(destination)){
+        std::ofstream empty(destination);
+        if(!empty)throw std::runtime_error("Cannot create cheat file");
+    }
+    emulation::updateCoreConfig(core,uuid,[&](Json& config){
+        config["cheatFile"]=destination.lexically_relative(base).generic_string();
+    });
+    gameOverrides=emulation::readJson(emulation::coreGameConfigFile(core,uuid));
+    return destination.string();
 }
 
 Json setting(const std::string& key, bool game) {

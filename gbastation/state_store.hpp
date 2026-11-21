@@ -19,6 +19,8 @@ public:
     void open(std::filesystem::path directory, const LegacyPath& legacy);
     int capacity(StateGroup group) const;
     SavedState entry(StateGroup group, int slot = 0) const;
+    std::string name(StateGroup group,int slot) const;
+    void rename(StateGroup group,int slot,const std::string& name);
     int save(StateGroup group, int slot, const Writer& write);
     void erase(StateGroup group, int slot);
     void expand(StateGroup group);

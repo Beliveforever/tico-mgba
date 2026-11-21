@@ -20,6 +20,9 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <sstream>
+#include <map>
+#include <filesystem>
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -1185,51 +1188,148 @@ std::string TicoCore::CheatFilePath(const char *extension) const
 // mGBA's .cheats: "# Name" starts a cheat, its code lines follow, and "!..."
 // lines are directives ("!GSAv1"/"!PARv3" pick the codec, "!disabled" is
 // ignored since every cheat starts off).
-void TicoCore::LoadCheats()
+namespace {
+std::vector<std::string> splitCheatCodes(const std::string& content)
 {
-    m_cheats.clear();
-    std::ifstream file(CheatFilePath(".cheats"));
-    if (!file.is_open())
-        return;
+    std::string lines=content;
+    std::replace(lines.begin(),lines.end(),'+','\n');
+    std::istringstream input(lines);
+    std::vector<std::string> result;
+    for(std::string line;std::getline(input,line);){
+        line=TicoUtils::Trim(line);
+        if(!line.empty())result.push_back(std::move(line));
+    }
+    return result;
+}
+}
+
+std::vector<TicoCore::Cheat> TicoCore::ReadCheats(const std::string& path)
+{
+    std::ifstream file(path,std::ios::binary);
+    if(!file)return {};
+    const auto length=std::filesystem::file_size(path);
+    if(length>2*1024*1024)throw std::runtime_error("Cheat file exceeds 2 MiB");
+    std::vector<Cheat> entries;
+    std::map<std::string,std::string> records;
     Cheat current;
-    bool have = false;
-    std::string line;
-    while (std::getline(file, line))
-    {
-        const std::string text = TicoUtils::Trim(line);
-        if (text.empty())
-            continue;
-        if (text[0] == '#')
-        {
-            if (have)
-                m_cheats.push_back(current);
-            current = Cheat();
-            current.name = TicoUtils::Trim(text.substr(1));
-            have = true;
-        }
-        else if (text[0] == '!')
-        {
-            if (have && text != "!disabled")
-                current.directives.push_back(text);
-        }
-        else if (text[0] == '[' || text.rfind("cheats", 0) == 0)
-        {
-            continue; // EZ-Flash and RetroArch .cht blocks aren't this format
-        }
-        else
-        {
-            if (!have)
-            {
-                current = Cheat();
-                current.name = "Cheat";
-                have = true;
-            }
+    bool have=false,retroArch=false,other=false;
+    for(std::string line;std::getline(file,line);){
+        const auto text=TicoUtils::Trim(line);
+        if(text.empty())continue;
+        if(text[0]=='#'){
+            if(have)entries.push_back(std::move(current));
+            current=Cheat{};
+            current.name=TicoUtils::Trim(text.substr(1));
+            have=true;
+        }else if(text[0]=='!'){
+            if(have && text=="!WoPlayPinned")current.pinned=true;
+            else if(have && text!="!disabled")current.directives.push_back(text);
+        }else if(text[0]=='['){
+            other=true;
+        }else if(const auto eq=text.find('=');eq!=std::string::npos&&text.rfind("cheat",0)==0){
+            retroArch=true;
+            const auto raw=TicoUtils::Trim(text.substr(eq+1));
+            const auto parsed=nlohmann::json::parse(raw,nullptr,false);
+            records[TicoUtils::Trim(text.substr(0,eq))]=parsed.is_string()?parsed.get<std::string>():raw;
+        }else if(!retroArch){
+            if(!have){current.name="Cheat";have=true;}
             current.codes.push_back(text);
         }
     }
-    if (have)
-        m_cheats.push_back(current);
-    tico_debug_log("CHEATS: %zu in %s", m_cheats.size(), CheatFilePath(".cheats").c_str());
+    if(file.bad())throw std::runtime_error("Cannot read cheat file");
+    if(other)throw std::runtime_error("Unsupported cheat file format");
+    if(!retroArch){
+        if(have)entries.push_back(std::move(current));
+        return entries;
+    }
+    entries.clear();
+    for(std::size_t i=0;i<4096;++i){
+        const auto prefix="cheat"+std::to_string(i);
+        const auto code=records.find(prefix+"_code");
+        if(code==records.end())break;
+        Cheat entry;
+        entry.name=records[prefix+"_desc"];
+        entry.codes=splitCheatCodes(code->second);
+        entry.directives=splitCheatCodes(records[prefix+"_woplay_directives"]);
+        entry.pinned=records[prefix+"_woplay_pinned"]=="true";
+        if(entry.name.empty())entry.name="Cheat "+std::to_string(i+1);
+        entries.push_back(std::move(entry));
+    }
+    if(entries.empty()&&records["cheats"]!="0")throw std::runtime_error("No valid cheats in file");
+    return entries;
+}
+
+void TicoCore::LoadCheats()
+{
+    m_cheats.clear();
+    try {m_cheats=ReadCheats(CheatFilePath(".cheats"));}
+    catch(const std::exception& error){tico_debug_log("CHEATS: %s",error.what());}
+}
+
+void TicoCore::OpenCheats(const std::string& path)
+{
+    if(IsHardcoreActive())return;
+    if(!path.empty())ReadCheats(path);
+    const auto chosen=woplay_host::chooseCheatFile(path);
+    m_cheats=ReadCheats(chosen);
+    ApplyCheats();
+}
+
+void TicoCore::SaveCheats(std::vector<Cheat> entries)
+{
+    if(IsHardcoreActive())return;
+    std::ostringstream out;
+    const auto file=CheatFilePath(".cheats");
+    if(std::filesystem::path(file).extension()==".cheats"){
+        for(const auto& entry:entries){
+            out<<"# "<<entry.name<<'\n';
+            if(entry.pinned)out<<"!WoPlayPinned\n";
+            for(const auto& line:entry.directives)out<<line<<'\n';
+            for(const auto& line:entry.codes)out<<line<<'\n';
+            out<<'\n';
+        }
+    }else{
+        out<<"cheats = "<<nlohmann::json(std::to_string(entries.size())).dump()<<'\n';
+        for(std::size_t i=0;i<entries.size();++i){
+            const auto& entry=entries[i];
+            const auto prefix="cheat"+std::to_string(i);
+            const auto joined=[](const auto& lines){
+                std::string text;
+                for(const auto& line:lines){if(!text.empty())text+='+';text+=line;}
+                return text;
+            };
+            out<<prefix<<"_desc = "<<nlohmann::json(entry.name).dump()<<'\n';
+            out<<prefix<<"_code = "<<nlohmann::json(joined(entry.codes)).dump()<<'\n';
+            out<<prefix<<"_enable = \"false\"\n";
+            if(entry.pinned)out<<prefix<<"_woplay_pinned = \"true\"\n";
+            if(!entry.directives.empty())
+                out<<prefix<<"_woplay_directives = "<<nlohmann::json(joined(entry.directives)).dump()<<'\n';
+        }
+    }
+    const auto data=out.str();
+    if(!TicoSafeFile::Write(file,data.data(),data.size(),1))throw std::runtime_error("Cannot save cheat file");
+    m_cheats=std::move(entries);
+    ApplyCheats();
+}
+
+std::vector<std::pair<uint32_t,std::vector<uint8_t>>> TicoCore::SearchableMemory() const
+{
+    std::vector<std::pair<uint32_t,std::vector<uint8_t>>> regions;
+    if(!m_gameLoaded||IsHardcoreActive())return regions;
+    for(const auto& map:m_memoryMaps){
+        std::size_t limit=0;
+        switch(map.start){
+        case 0x02000000: limit=0x40000;break;
+        case 0x03000000: limit=0x8000;break;
+        case 0xC000: limit=0x2000;break;
+        case 0xD000: limit=0x1000;break;
+        default:continue;
+        }
+        const auto count=std::min(limit,std::size_t(map.length));
+        if(map.ptr&&count)regions.emplace_back(static_cast<uint32_t>(map.start),
+                     std::vector<uint8_t>(map.ptr,map.ptr+count));
+    }
+    return regions;
 }
 
 void TicoCore::ApplyCheats()

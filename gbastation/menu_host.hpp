@@ -27,6 +27,7 @@ void drawOverlay(ImDrawList& draw, ImVec2 bounds);
 std::optional<woplay_host::StateRequest> takeStateAction();
 void hud(float fps, int width, int height, bool fast);
 void input(_SDL_GameController* pad);
+bool bindingActive();
 void touch(const SwitchFrontend::OverlayUI::TouchInput& input);
 void notify(const std::string& text);
 std::string translate(const std::string& key);
@@ -46,6 +47,7 @@ inline void drawOverlay(ImDrawList&, ImVec2) {}
 inline std::optional<woplay_host::StateRequest> takeStateAction() { return {}; }
 inline void hud(float, int, int, bool) {}
 inline void input(_SDL_GameController*) {}
+inline bool bindingActive() { return false; }
 inline void touch(const SwitchFrontend::OverlayUI::TouchInput&) {}
 inline void notify(const std::string&) {}
 inline std::string translate(const std::string& key) { return key; }

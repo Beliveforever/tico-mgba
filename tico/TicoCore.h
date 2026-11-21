@@ -115,9 +115,14 @@ public:
         std::vector<std::string> codes;      // code lines
         std::vector<std::string> directives; // "!GSAv1" / "!PARv3" codec hints
         bool enabled = false;
+        bool pinned = false;
     };
     const std::vector<Cheat> &GetCheats() const { return m_cheats; }
     void ToggleCheat(size_t index);
+    static std::vector<Cheat> ReadCheats(const std::string& path);
+    void OpenCheats(const std::string& path);
+    void SaveCheats(std::vector<Cheat> entries);
+    std::vector<std::pair<uint32_t,std::vector<uint8_t>>> SearchableMemory() const;
     /// True once if the previous session ended without cleanup while cheats
     /// were on (a freeze or a kill), so the frontend can say why they are off.
     bool ConsumeCheatsRecovered()

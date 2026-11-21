@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 namespace emulation = gbastation::emulation;
 using emulation::Json;
 namespace {
-constexpr int defaultCapacity = 3;
+constexpr int defaultCapacity = 10;
 const char* key(StateGroup group) {
     switch (group) {
     case StateGroup::Cycle: return "cycle";
@@ -45,8 +45,7 @@ void validate(const Json& index) {
     if (index.at("schemaVersion") != 1) throw std::runtime_error("Unsupported save state index");
     for (const auto group : {StateGroup::Cycle, StateGroup::Manual, StateGroup::Resume}) {
         const auto& entries = index.at(key(group));
-        if (!entries.is_array() ||
-            (group == StateGroup::Resume ? entries.size() != 1 : entries.size() < defaultCapacity) ||
+        if (!entries.is_array() || entries.empty() ||
             entries.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
             throw std::runtime_error("Invalid save state slots");
         for (const auto& entry : entries) {
@@ -69,9 +68,15 @@ void StateStore::open(fs::path directory, const LegacyPath& legacy) {
     index_ = emulation::readJson(root_ / "index.json");
     const bool fresh = index_.empty();
     if (!fresh) validate(index_);
-    Json next = fresh ? Json{{"schemaVersion", 1}, {"sequence", 0u},
-              {"cycle", {nullptr, nullptr, nullptr}}, {"manual", {nullptr, nullptr, nullptr}},
-              {"resume", {nullptr}}} : index_;
+    Json next = fresh ? Json{{"schemaVersion",1},{"sequence",0u}} : index_;
+    if(next.value("slotLayout",0)==0){
+        for(const auto group:{StateGroup::Manual,StateGroup::Resume,StateGroup::Cycle}){
+            auto& entries=next[key(group)];
+            if(fresh)entries=Json::array();
+            while(entries.size()<defaultCapacity)entries.push_back(nullptr);
+        }
+        next["slotLayout"]=1;
+    }
     if (!next.contains("legacySlots"))
         next["legacySlots"] = {false,false,false,false,false,false};
     auto sequence = next.at("sequence").get<std::uint64_t>();
@@ -122,6 +127,25 @@ int StateStore::capacity(StateGroup group) const {
     return static_cast<int>(index_.at(key(group)).size());
 }
 
+std::string StateStore::name(StateGroup group,int slot) const {
+    const auto groups=index_.find("names");
+    if(groups==index_.end()||!groups->is_object())return {};
+    const auto names=groups->find(key(group));
+    if(names==groups->end()||!names->is_object())return {};
+    const auto field=names->find(std::to_string(slot));
+    return field!=names->end()&&field->is_string()?field->get<std::string>():std::string{};
+}
+
+void StateStore::rename(StateGroup group,int slot,const std::string& name) {
+    if(slot<1||slot>capacity(group)||name.size()>255)throw std::runtime_error("Invalid save slot name");
+    if(name==this->name(group,slot))return;
+    auto next=index_;
+    auto& names=next["names"][key(group)];
+    if(name.empty())names.erase(std::to_string(slot));
+    else names[std::to_string(slot)]=name;
+    commit(std::move(next));
+}
+
 SavedState StateStore::entry(StateGroup group, int slot) const {
     const auto& entries = index_.at(key(group));
     if (slot == 0) {
@@ -140,8 +164,7 @@ SavedState StateStore::entry(StateGroup group, int slot) const {
 int StateStore::save(StateGroup group, int slot, const Writer& write) {
     auto next = index_;
     auto& entries = next.at(key(group));
-    if (group == StateGroup::Cycle) {
-        slot = 0;
+    if (slot == 0 && group != StateGroup::Manual) {
         int oldest = 1;
         for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
             if (entries[i].is_null()) {
@@ -151,8 +174,6 @@ int StateStore::save(StateGroup group, int slot, const Writer& write) {
             if (order(entries[i]) < order(entries[oldest - 1])) oldest = i + 1;
         }
         if (!slot) slot = oldest;
-    } else if (group == StateGroup::Resume) {
-        slot = 1;
     }
     if (slot < 1 || slot > static_cast<int>(entries.size()))
         throw std::runtime_error("Invalid save slot");
@@ -189,7 +210,6 @@ void StateStore::erase(StateGroup group, int slot) {
 }
 
 void StateStore::expand(StateGroup group) {
-    if (group == StateGroup::Resume) return;
     auto next = index_;
     next.at(key(group)).push_back(nullptr);
     commit(std::move(next));

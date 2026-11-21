@@ -36,6 +36,7 @@ std::string stateFile(StateGroup group, int slot = 0);
 int saveState(StateGroup group, int slot, const std::function<bool(const std::string&)>& write);
 void deleteState(StateGroup group, int slot);
 void expandStates(StateGroup group);
+void renameState(StateGroup group,int slot,const std::string& name);
 std::uint64_t sessionSeconds();
 DisplayGeometry displayGeometry();
 bool shaderEnabled();
@@ -43,6 +44,7 @@ std::string shaderPreferenceKey();
 std::uint64_t displayConfigRevision();
 std::string overlayPath();
 std::string cheatsFile(const char* extension);
+std::string chooseCheatFile(const std::string& source);
 std::string option(std::string_view key, std::string_view fallback = {});
 std::string optionJson(std::string_view key);
 void setOptionJson(const std::string& key, const std::string& value);
@@ -65,6 +67,7 @@ inline std::string stateFile(StateGroup, int = 0) { return {}; }
 inline int saveState(StateGroup, int, const std::function<bool(const std::string&)>&) { return 0; }
 inline void deleteState(StateGroup, int) {}
 inline void expandStates(StateGroup) {}
+inline void renameState(StateGroup,int,const std::string&) {}
 inline std::uint64_t sessionSeconds() { return 0; }
 inline DisplayGeometry displayGeometry() { return {}; }
 inline bool shaderEnabled() { return true; }
@@ -72,6 +75,7 @@ inline std::string shaderPreferenceKey() { return {}; }
 inline std::uint64_t displayConfigRevision() { return 0; }
 inline std::string overlayPath() { return {}; }
 inline std::string cheatsFile(const char*) { return {}; }
+inline std::string chooseCheatFile(const std::string&) { return {}; }
 inline std::string option(std::string_view, std::string_view value = {}) { return std::string(value); }
 inline std::string optionJson(std::string_view) { return {}; }
 inline void setOptionJson(const std::string&, const std::string&) {}
