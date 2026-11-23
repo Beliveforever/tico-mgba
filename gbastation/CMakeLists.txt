@@ -84,11 +84,22 @@ if(GBS_PLATFORM STREQUAL "switch")
     set_target_properties(woplay-mgba PROPERTIES SUFFIX ".elf")
     find_program(ELF2NRO elf2nro HINTS "$ENV{DEVKITPRO}/tools/bin" REQUIRED)
     find_program(NACPTOOL nacptool HINTS "$ENV{DEVKITPRO}/tools/bin" REQUIRED)
+    set(TICO_ROMFS "${CMAKE_CURRENT_BINARY_DIR}/tico-romfs")
+    set(SIDEBAR_FONT "${FRONTEND}/assets/fonts/MaterialIcons-Regular.ttf")
+    file(GLOB_RECURSE tico_romfs_assets CONFIGURE_DEPENDS
+        "${TICO}/assets/*" "${TICO}/fonts/*" "${TICO}/lang/*" "${TICO}/shaders/*")
     add_custom_command(OUTPUT core.nacp
         COMMAND "${NACPTOOL}" --create "WoPlay mGBA" "WoPlay" "3.0.2" core.nacp VERBATIM)
     add_custom_command(OUTPUT woplay-mgba.nro
-        COMMAND "${ELF2NRO}" "$<TARGET_FILE:woplay-mgba>" woplay-mgba.nro --nacp=core.nacp
-        DEPENDS woplay-mgba core.nacp VERBATIM)
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${TICO_ROMFS}/module"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${TICO}/assets" "${TICO_ROMFS}/assets"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${TICO}/fonts" "${TICO_ROMFS}/fonts"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${TICO}/lang" "${TICO_ROMFS}/lang"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${TICO}/shaders" "${TICO_ROMFS}/shaders"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${TICO}/module/settings.json" "${TICO_ROMFS}/module/settings.json"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${SIDEBAR_FONT}" "${TICO_ROMFS}/fonts/"
+        COMMAND "${ELF2NRO}" "$<TARGET_FILE:woplay-mgba>" woplay-mgba.nro --nacp=core.nacp --romfsdir=${TICO_ROMFS}
+        DEPENDS woplay-mgba core.nacp ${tico_romfs_assets} "${SIDEBAR_FONT}" "${TICO}/module/settings.json" VERBATIM)
     add_custom_target(woplay_mgba_nro ALL DEPENDS woplay-mgba.nro)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/woplay-mgba.nro" DESTINATION .)
 else()

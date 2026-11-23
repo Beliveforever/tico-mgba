@@ -146,131 +146,6 @@
           ]
         },
         {
-          "title": "settings_mgba_section_fast_forward",
-          "options": [
-            {
-              "key": "fast_forward_speed",
-              "label": "settings_mgba_fast_forward_speed",
-              "type": "enum",
-              "default": "200",
-              "choices": [
-                {
-                  "label": "150%",
-                  "value": "150"
-                },
-                {
-                  "label": "200%",
-                  "value": "200"
-                },
-                {
-                  "label": "300%",
-                  "value": "300"
-                },
-                {
-                  "label": "400%",
-                  "value": "400"
-                },
-                {
-                  "label": "Unlimited",
-                  "value": "unlimited"
-                }
-              ]
-            },
-            {
-              "key": "fast_forward_mode",
-              "label": "settings_mgba_fast_forward_mode",
-              "type": "enum",
-              "default": "hold",
-              "choices": [
-                {
-                  "label": "Hold",
-                  "value": "hold"
-                },
-                {
-                  "label": "Toggle",
-                  "value": "toggle"
-                }
-              ]
-            },
-            {
-              "key": "fast_forward_hotkey",
-              "label": "settings_mgba_fast_forward_hotkey",
-              "type": "enum",
-              "default": "ZR",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
-            }
-          ]
-        },
-        {
           "title": "settings_mgba_section_hud",
           "options": [
             {
@@ -1619,6 +1494,234 @@
               "label": "settings_mgba_analog_dpad",
               "type": "bool",
               "default": "enabled"
+            }
+          ]
+        },
+        {
+          "title": "settings_mgba_section_hotkeys",
+          "options": [
+            {
+              "key": "menu_hotkey",
+              "label": "settings_mgba_menu_hotkey",
+              "type": "binding",
+              "default": "ZR+ZL"
+            },
+            {
+              "key": "quick_save_hotkey",
+              "label": "settings_mgba_quick_save_hotkey",
+              "type": "binding",
+              "default": "ZR+A"
+            },
+            {
+              "key": "quick_load_hotkey",
+              "label": "settings_mgba_quick_load_hotkey",
+              "type": "binding",
+              "default": "ZR+B"
+            },
+            {
+              "key": "screenshot_hotkey",
+              "label": "settings_mgba_screenshot_hotkey",
+              "type": "binding",
+              "default": "None"
+            }
+          ]
+        },
+        {
+          "title": "settings_mgba_section_fast_forward",
+          "options": [
+            {
+              "key": "fast_forward_speed",
+              "label": "settings_mgba_fast_forward_speed",
+              "type": "enum",
+              "default": "200",
+              "choices": [
+                {
+                  "label": "150%",
+                  "value": "150"
+                },
+                {
+                  "label": "200%",
+                  "value": "200"
+                },
+                {
+                  "label": "300%",
+                  "value": "300"
+                },
+                {
+                  "label": "400%",
+                  "value": "400"
+                },
+                {
+                  "label": "Unlimited",
+                  "value": "unlimited"
+                }
+              ]
+            },
+            {
+              "key": "fast_forward_mode",
+              "label": "settings_mgba_fast_forward_mode",
+              "type": "enum",
+              "default": "hold",
+              "choices": [
+                {
+                  "label": "Hold",
+                  "value": "hold"
+                },
+                {
+                  "label": "Toggle",
+                  "value": "toggle"
+                }
+              ]
+            },
+            {
+              "key": "fast_forward_hotkey",
+              "label": "settings_mgba_fast_forward_hotkey",
+              "type": "enum",
+              "default": "StickL",
+              "choices": [
+                {
+                  "label": "A",
+                  "value": "A"
+                },
+                {
+                  "label": "B",
+                  "value": "B"
+                },
+                {
+                  "label": "X",
+                  "value": "X"
+                },
+                {
+                  "label": "Y",
+                  "value": "Y"
+                },
+                {
+                  "label": "L",
+                  "value": "L"
+                },
+                {
+                  "label": "R",
+                  "value": "R"
+                },
+                {
+                  "label": "ZL",
+                  "value": "ZL"
+                },
+                {
+                  "label": "ZR",
+                  "value": "ZR"
+                },
+                {
+                  "label": "Plus",
+                  "value": "Plus"
+                },
+                {
+                  "label": "Minus",
+                  "value": "Minus"
+                },
+                {
+                  "label": "Left stick",
+                  "value": "StickL"
+                },
+                {
+                  "label": "Right stick",
+                  "value": "StickR"
+                },
+                {
+                  "label": "Up",
+                  "value": "Up"
+                },
+                {
+                  "label": "Down",
+                  "value": "Down"
+                },
+                {
+                  "label": "Left",
+                  "value": "Left"
+                },
+                {
+                  "label": "Right",
+                  "value": "Right"
+                },
+                {
+                  "label": "Disabled",
+                  "value": "None"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "settings_mgba_section_rewind",
+          "options": [
+            {
+              "key": "rewind_hotkey",
+              "label": "settings_mgba_rewind_hotkey",
+              "type": "binding",
+              "default": "StickR"
+            },
+            {
+              "key": "rewind_mode",
+              "label": "settings_mgba_rewind_mode",
+              "type": "enum",
+              "default": "hold",
+              "choices": [
+                {
+                  "label": "Hold",
+                  "value": "hold"
+                },
+                {
+                  "label": "Toggle",
+                  "value": "toggle"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "settings_mgba_section_rapid_fire",
+          "options": [
+            {
+              "key": "rapid_fire_hotkey",
+              "label": "settings_mgba_rapid_fire_hotkey",
+              "type": "binding",
+              "default": "None"
+            },
+            {
+              "key": "rapid_fire_mode",
+              "label": "settings_mgba_rapid_fire_mode",
+              "type": "enum",
+              "default": "hold",
+              "choices": [
+                {
+                  "label": "Hold",
+                  "value": "hold"
+                },
+                {
+                  "label": "Toggle",
+                  "value": "toggle"
+                }
+              ]
+            },
+            {
+              "key": "rapid_fire_rate",
+              "label": "settings_mgba_rapid_fire_rate",
+              "type": "enum",
+              "default": "5",
+              "choices": [
+                {
+                  "label": "Once per second",
+                  "value": "1"
+                },
+                {
+                  "label": "Five per second",
+                  "value": "5"
+                },
+                {
+                  "label": "Once every two seconds",
+                  "value": "0.5"
+                }
+              ]
             }
           ]
         },

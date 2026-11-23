@@ -39,6 +39,8 @@
 #include "deps/stb/stb_image.h"
 #include "deps/stb/stb_image_write.h"
 #include <array>
+#include <chrono>
+#include <filesystem>
 #include <ctime>
 #include <vector>
 #include "TicoLogger.h"
@@ -389,12 +391,12 @@ static void FramePixel(unsigned x, unsigned y, uint8_t *out)
 
 // Saves the last frame beside a save state, shrunk to fit 256x192 (box
 // filtered), just big enough for the Save/Load State panel.
-static bool SaveStatePicture(const std::string &path)
+static bool SaveStatePicture(const std::string &path,bool thumbnail=true)
 {
     if (g_lastFrame.data.empty() || !g_lastFrame.width || !g_lastFrame.height)
         return false;
     const unsigned srcW = g_lastFrame.width, srcH = g_lastFrame.height;
-    const float fit = std::min({1.0f, 256.0f / srcW, 192.0f / srcH});
+    const float fit = thumbnail ? std::min({1.0f, 256.0f / srcW, 192.0f / srcH}) : 1.0f;
     const unsigned dstW = std::max(1u, (unsigned)(srcW * fit));
     const unsigned dstH = std::max(1u, (unsigned)(srcH * fit));
     std::vector<uint8_t> out(dstW * dstH * 4);
@@ -487,6 +489,12 @@ bool InitImGui()
     }
     // Load secondary font for RA alert descriptions
     io.Fonts->AddFontFromFileTTF("romfs:/fonts/description.ttf", TicoConfig::FONT_SIZE * 0.75f);
+#ifdef WOPLAY_HOST
+    if (FILE* icons = std::fopen("romfs:/fonts/MaterialIcons-Regular.ttf", "rb")) {
+        std::fclose(icons);
+        OverlayUI::SetSidebarFont(io.Fonts->AddFontFromFileTTF("romfs:/fonts/MaterialIcons-Regular.ttf", 20.f));
+    }
+#endif
 #else
     if (!io.Fonts->AddFontFromFileTTF("tico/fonts/font.ttf", TicoConfig::FONT_SIZE))
     {
@@ -555,19 +563,6 @@ void ProcessEvents()
         }
 #endif
 
-        if (woplay_host::active() && g_core && event.type == SDL_KEYDOWN && !event.key.repeat &&
-            event.key.keysym.scancode == SDL_SCANCODE_F1 && !woplay_menu::bindingActive()) {
-            if (g_menuOpen) CloseMenu();
-            else OpenMenu();
-        }
-        if (woplay_host::active() && g_core && !g_menuOpen && event.type == SDL_KEYDOWN && !event.key.repeat) {
-            using woplay_host::StateGroup;
-            using woplay_host::StateOperation;
-            if (event.key.keysym.scancode == SDL_SCANCODE_F5)
-                RunWoPlayState({StateOperation::Save,StateGroup::Cycle});
-            else if (event.key.keysym.scancode == SDL_SCANCODE_F8)
-                RunWoPlayState({StateOperation::Load,StateGroup::Cycle});
-        }
         if (event.type == SDL_QUIT)
         {
             LOG_INFO("HOME", "Received SDL_QUIT event");
@@ -1481,7 +1476,8 @@ static uint32_t SwitchButtonsHeld(SDL_GameController *pad)
     return held;
 }
 
-static bool MappingHeld(const std::string& value,uint32_t held,bool keyboard,uint32_t* used=nullptr)
+static bool MappingHeld(const std::string& value,uint32_t held,bool keyboard,uint32_t* used=nullptr,
+                        const std::vector<std::string>* consumedKeys=nullptr)
 {
 #ifdef WOPLAY_HOST
     if(woplay_host::active()){
@@ -1489,7 +1485,9 @@ static bool MappingHeld(const std::string& value,uint32_t held,bool keyboard,uin
         const bool down=gbastation::ui::bindingHeld(value,[&](std::string_view token){
             const auto button=SwitchBitFor(token);
             mask|=button;
-            return button ? (held&button)!=0 : keyboard&&gbastation::ui::keyboardBindingDown(token);
+            return button ? (held&button)!=0 : keyboard&&
+                (!consumedKeys||std::find(consumedKeys->begin(),consumedKeys->end(),token)==consumedKeys->end())&&
+                gbastation::ui::keyboardBindingDown(token);
         });
         if(used)*used=down?mask:0;
         return down;
@@ -1520,6 +1518,175 @@ static const ButtonMapping kButtonMappings[] = {
     {"map_left", "Left", RETRO_DEVICE_ID_JOYPAD_LEFT},
     {"map_right", "Right", RETRO_DEVICE_ID_JOYPAD_RIGHT},
 };
+
+#ifdef WOPLAY_HOST
+namespace {
+using InputClock=std::chrono::steady_clock;
+enum Hotkey { Menu, QuickSave, QuickLoad, Screenshot, FastForward, Rewind, RapidFire, HotkeyCount };
+struct HotkeyDefinition { const char* key; const char* fallback; const char* keyboard; };
+constexpr HotkeyDefinition hotkeyDefinitions[]={
+    {"menu_hotkey","ZR+ZL","Key:F1"}, {"quick_save_hotkey","ZR+A","Key:F5"},
+    {"quick_load_hotkey","ZR+B","Key:F8"}, {"screenshot_hotkey","None",nullptr},
+    {"fast_forward_hotkey","StickL",nullptr}, {"rewind_hotkey","StickR",nullptr},
+    {"rapid_fire_hotkey","None",nullptr},
+};
+struct HotkeyInput {
+    bool down=false;
+    uint32_t pad=0;
+    std::vector<std::string> keys;
+    std::size_t buttons=0;
+};
+std::array<bool,HotkeyCount> hotkeyHeld{};
+std::array<std::string,HotkeyCount> lastHotkeyBindings{};
+bool rewindLatched=false,rapidLatched=false,rewinding=false,rewindAvailable=false,rapidEnabled=false;
+InputClock::time_point nextRewindStep{},nextRewindRecord{};
+std::chrono::milliseconds rapidInterval{200};
+constexpr std::array rapidActions{RETRO_DEVICE_ID_JOYPAD_A,RETRO_DEVICE_ID_JOYPAD_B,
+    RETRO_DEVICE_ID_JOYPAD_L,RETRO_DEVICE_ID_JOYPAD_R};
+std::array<bool,rapidActions.size()> rapidTargets{};
+std::array<InputClock::time_point,rapidActions.size()> nextRapidPulse{};
+
+HotkeyInput ReadHotkey(std::string_view binding,uint32_t held){
+    HotkeyInput input;
+    input.down=gbastation::ui::bindingHeld(binding,[&](std::string_view token){
+        ++input.buttons;
+        const auto bit=SwitchBitFor(token);
+        if(bit){input.pad|=bit;return (held&bit)!=0;}
+        if(!gbastation::ui::keyboardBindingDown(token))return false;
+        input.keys.emplace_back(token);
+        return true;
+    });
+    return input.down?std::move(input):HotkeyInput{};
+}
+
+bool InputHeld(uint32_t held){
+    int length=0;
+    const auto* keys=SDL_GetKeyboardState(&length);
+    return held||std::any_of(keys,keys+length,[](uint8_t key){return key!=0;});
+}
+
+void CaptureWoPlayScreenshot(){
+    try{
+        const auto folder=std::filesystem::path(woplay_host::screenshotDirectory());
+        std::filesystem::create_directories(folder);
+        const auto timestamp=std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        static unsigned sequence=0;
+        auto file=folder/("screenshot-"+std::to_string(timestamp)+"-"+std::to_string(++sequence)+".png");
+        if(SaveStatePicture(file.string(),false)){
+            CoreToast(CoreText("screenshot_saved"));
+            return;
+        }
+    }catch(const std::exception& error){
+        LOG_ERROR("HOME","Screenshot failed: %s",error.what());
+    }
+    CoreToast(CoreText("screenshot_failed"));
+}
+
+bool UpdateWoPlayHotkeys(uint32_t held,uint32_t& consumed,std::vector<std::string>& keys){
+    std::array<HotkeyInput,HotkeyCount> samples{};
+    std::array<int,HotkeyCount> priority{};
+    const bool inMenu=g_menuOpen;
+    for(int i=0;i<HotkeyCount;++i){
+        priority[i]=i;
+        if(inMenu&&i!=Menu)continue;
+        const auto& def=hotkeyDefinitions[i];
+        const auto binding=woplay_host::option(def.key,def.fallback);
+        if(lastHotkeyBindings[i]!=binding){
+            lastHotkeyBindings[i]=binding;
+            if(i==FastForward)g_ffLatched=false;
+            if(i==Rewind)rewindLatched=false;
+            if(i==RapidFire)rapidLatched=false;
+        }
+        samples[i]=ReadHotkey(binding,held);
+        if(!samples[i].down&&def.keyboard&&binding==def.fallback)
+            samples[i]=ReadHotkey(def.keyboard,held);
+        if(i==Rewind)rewindAvailable=binding!="None"&&!binding.empty();
+    }
+    std::stable_sort(priority.begin(),priority.end(),[&](int a,int b){return samples[a].buttons>samples[b].buttons;});
+    std::array<bool,HotkeyCount> down{},pressed{};
+    for(const int i:priority){
+        const auto& sample=samples[i];
+        const bool shared=std::any_of(sample.keys.begin(),sample.keys.end(),[&](const auto& key){
+            return std::find(keys.begin(),keys.end(),key)!=keys.end();
+        });
+        if(sample.down&&!(sample.pad&consumed)&&!shared){
+            down[i]=true;
+            consumed|=sample.pad;
+            keys.insert(keys.end(),sample.keys.begin(),sample.keys.end());
+        }
+    }
+    for(int i=0;i<HotkeyCount;++i){
+        pressed[i]=down[i]&&!hotkeyHeld[i];
+        hotkeyHeld[i]=samples[i].down;
+    }
+    if(pressed[Menu]&&g_core&&!woplay_menu::bindingActive()){
+        if(g_menuOpen)CloseMenu();
+        else OpenMenu();
+    }
+    if(g_menuOpen){
+        FeedMenuTouch();
+        rewindLatched=false;
+        rewinding=rapidEnabled=false;
+        return false;
+    }
+    if(g_waitGameInput||!g_core){
+        if(g_core)g_core->ClearInputs();
+        g_waitGameInput=InputHeld(held);
+        rewinding=rapidEnabled=false;
+        g_audio.SetFastForward(false);
+        return false;
+    }
+
+    using woplay_host::StateGroup;
+    using woplay_host::StateOperation;
+    if(pressed[QuickSave]||pressed[QuickLoad]){
+        g_core->ClearInputs();
+        RunWoPlayState({pressed[QuickSave]?StateOperation::Save:StateOperation::Load,StateGroup::Cycle});
+        g_waitGameInput=true;
+        rewinding=rapidEnabled=false;
+        g_audio.SetFastForward(false);
+        return false;
+    }
+    if(pressed[Screenshot])CaptureWoPlayScreenshot();
+    const auto active=[&](Hotkey key,const char* mode,bool& latch){
+        if(woplay_host::option(mode,"hold")!="toggle"){latch=false;return down[key];}
+        if(pressed[key])latch=!latch;
+        return latch;
+    };
+    const bool canRewind=rewindAvailable&&!g_core->IsHardcoreActive();
+    if(!canRewind){rewindLatched=false;g_core->ClearRewind();}
+    const bool backward=canRewind&&active(Rewind,"rewind_mode",rewindLatched);
+    if(backward!=rewinding){
+        g_audio.Flush();
+        nextRewindStep=nextRewindRecord={};
+    }
+    rewinding=backward;
+    const bool fast=active(FastForward,"fast_forward_mode",g_ffLatched)&&!rewinding;
+    if(!fast)g_ffFrameBudget=0;
+    g_audio.SetFastForward(fast);
+    rapidEnabled=active(RapidFire,"rapid_fire_mode",rapidLatched);
+    const auto speed=woplay_host::option("rapid_fire_rate","5");
+    rapidInterval=std::chrono::milliseconds(speed=="1"?1000:speed=="0.5"?2000:200);
+    rapidTargets.fill(false);
+    if(rewinding){g_core->ClearInputs();return false;}
+    return true;
+}
+
+void ApplyRapidFire(){
+    const auto now=InputClock::now();
+    for(std::size_t i=0;i<rapidActions.size();++i){
+        if(!rapidEnabled||!rapidTargets[i]){
+            nextRapidPulse[i]={};
+            continue;
+        }
+        const bool pulse=now>=nextRapidPulse[i];
+        if(pulse)nextRapidPulse[i]=now+rapidInterval;
+        g_core->SetInputState(0,rapidActions[i],pulse);
+    }
+}
+}
+#endif
 
 // Updates fast forward from player 1's hotkey and returns the hotkey's
 // Switch button (0 when there is none), which then stays out of the game.
@@ -1920,43 +2087,12 @@ void HandleInput()
     }
 
     SDL_GameController *pad = numControllers > 0 ? controllers[0] : nullptr;
-    if (woplay_host::active()) {
-        const auto triggerMask = SwitchBit(SwitchButton::ZL) | SwitchBit(SwitchButton::ZR);
-        const auto held = pad ? SwitchButtonsHeld(pad) : 0;
-        const bool toggle = (held & triggerMask) == triggerMask;
-        if (toggle && !g_toggleHeld && g_core && !woplay_menu::bindingActive()) {
-            if (g_menuOpen) CloseMenu();
-            else OpenMenu();
-        }
-        g_toggleHeld = toggle;
-        const auto xMask = SwitchBit(SwitchButton::X);
-        const auto leftStick = SwitchBit(SwitchButton::StickL);
-        const auto rightStick = SwitchBit(SwitchButton::StickR);
-        const auto shortcutMask = xMask | leftStick | rightStick;
-        const auto shortcut = held & shortcutMask;
-        const bool quickSave = !toggle && shortcut == (xMask | leftStick);
-        const bool quickLoad = !toggle && shortcut == (xMask | rightStick);
-        static bool quickHeld = false;
-        const bool quickPress = (quickSave || quickLoad) && !quickHeld;
-        quickHeld = quickSave || quickLoad;
-        if (g_menuOpen) {
-            FeedMenuTouch();
-            return;
-        }
-        if (g_waitGameInput) {
-            if (g_core) g_core->ClearInputs();
-            g_waitGameInput = (held & (triggerMask | shortcutMask | SwitchBit(SwitchButton::A) | SwitchBit(SwitchButton::B))) != 0;
-            return;
-        }
-        if (quickPress && g_core) {
-            using woplay_host::StateGroup;
-            using woplay_host::StateOperation;
-            g_core->ClearInputs();
-            RunWoPlayState({quickSave ? StateOperation::Save : StateOperation::Load,StateGroup::Cycle});
-            g_waitGameInput = true;
-            return;
-        }
-    } else if (pad && g_overlayReady)
+    uint32_t hotkeyButtons=0;
+    std::vector<std::string> hotkeyKeys;
+#ifdef WOPLAY_HOST
+    if(woplay_host::active()&&!UpdateWoPlayHotkeys(pad?SwitchButtonsHeld(pad):0,hotkeyButtons,hotkeyKeys))return;
+#endif
+    if (!woplay_host::active() && pad && g_overlayReady)
     {
         // Guide, or Plus+Minus, opens the menu and closes it again.
         const bool start = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START);
@@ -1991,7 +2127,7 @@ void HandleInput()
         g_core->ClearInputs();
 
         // Player 1's fast-forward hotkey: its Switch button is not mapped.
-        const uint32_t ffButton = UpdateFastForward(numControllers > 0 ? controllers[0] : nullptr);
+        const uint32_t ffButton = woplay_host::active()?hotkeyButtons:UpdateFastForward(pad);
         const bool analogDpad = OverlayConfig::GetConfigValue("analog_dpad", "enabled") != "disabled";
 
         for (int p=0; p<std::max(woplay_host::active()?1:0,numControllers); ++p)
@@ -1999,8 +2135,6 @@ void HandleInput()
             SDL_GameController *controller=p<numControllers?controllers[p]:nullptr;
             if(!controller&&p>0)continue;
             uint32_t held=controller?SwitchButtonsHeld(controller):0;
-            if (p == 0)
-                held &= ~ffButton;
             if (analogDpad && controller)
             {
                 const int16_t leftX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
@@ -2011,11 +2145,20 @@ void HandleInput()
                 if (leftX > 16000) held |= SwitchBit(SwitchButton::Right);
             }
 
+            if(p==0)held&=~ffButton;
+
             // Controls > Button mapping: each GBA button on its Switch button.
             for (const ButtonMapping &mapping : kButtonMappings)
             {
-                g_core->SetInputState(p,mapping.retroId,
-                    MappingHeld(OverlayConfig::GetConfigValue(mapping.key,mapping.fallback),held,p==0));
+                const bool pressed=MappingHeld(OverlayConfig::GetConfigValue(mapping.key,mapping.fallback),
+                    held,p==0,nullptr,&hotkeyKeys);
+                g_core->SetInputState(p,mapping.retroId,pressed);
+#ifdef WOPLAY_HOST
+                if(woplay_host::active()&&p==0&&rapidEnabled){
+                    const auto action=std::find(rapidActions.begin(),rapidActions.end(),mapping.retroId);
+                    if(action!=rapidActions.end())rapidTargets[action-rapidActions.begin()]=pressed;
+                }
+#endif
             }
         }
     }
@@ -2064,6 +2207,17 @@ void Render()
     GetDisplayResolution(w, h);
     ImVec2 displaySize((float)w, (float)h);
 
+#ifdef WOPLAY_HOST
+    if(g_core&&!g_menuOpen&&woplay_host::active()&&rewinding){
+        g_frameAccum=0;
+        const auto now=InputClock::now();
+        if(now>=nextRewindStep){
+            g_core->RewindStep();
+            nextRewindStep=now+std::chrono::milliseconds(85);
+        }
+    }
+    else
+#endif
     if (g_core && !g_menuOpen)
     {
         if (frameCount <= 3)
@@ -2073,8 +2227,17 @@ void Render()
         while (g_frameAccum >= 1.0)
         {
             g_frameAccum -= 1.0;
+#ifdef WOPLAY_HOST
+            if(woplay_host::active())ApplyRapidFire();
+#endif
             g_core->RunFrame();
         }
+#ifdef WOPLAY_HOST
+        if(woplay_host::active()&&rewindAvailable&&InputClock::now()>=nextRewindRecord){
+            g_core->RecordRewind();
+            nextRewindRecord=InputClock::now()+std::chrono::milliseconds(200);
+        }
+#endif
         if (g_offerResume)
             OfferResume();
     }

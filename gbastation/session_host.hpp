@@ -31,6 +31,7 @@ std::string rom();
 std::string title();
 std::string resumePolicy();
 std::string directory(const char* name);
+std::string screenshotDirectory();
 std::string batteryFile(const char* extension, bool loading);
 std::string stateFile(StateGroup group, int slot = 0);
 int saveState(StateGroup group, int slot, const std::function<bool(const std::string&)>& write);

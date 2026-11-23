@@ -233,12 +233,12 @@ bool initialize(std::function<void()> settingsChanged) {
                             static_cast<ui::SurfaceAppearance*>(&style.toast)}) {
             const auto material = layer->material == ui::Material::Inherit ? style.material : layer->material;
             if (needsEffects(material)) {
-                layer->material = ui::Material::Flat;
+                layer->material = layer == &style.container ? ui::Material::Transparent :
+                                  layer == &style.card ? ui::Material::Flat : ui::Material::LiquidGlass;
                 layer->flatColor.w = std::max(.86f, layer->flatColor.w);
             }
         }
         if (needsEffects(style.material)) style.material = ui::Material::Flat;
-        style.tab.material = ui::Material::LiquidGlass;
         effects = std::make_unique<VulkanMenuEffects>();
         if (!effects->initialize())
             std::fprintf(stderr,"WoPlay Vulkan glass: initialization failed\n");

@@ -10,6 +10,10 @@
 
 #include "overlay/tico_config.h"
 
+#ifdef WOPLAY_HOST
+struct ImFont;
+#endif
+
 namespace SwitchFrontend::OverlayUI {
 
 enum class Action {
@@ -93,6 +97,9 @@ void SetAvatarTextureId(unsigned long long texture_id);
 // The selection border strip for the tint picked in tico (0 when there is
 // none; selected rows then get a plain highlight).
 void SetBorderTextureId(unsigned long long texture_id);
+#ifdef WOPLAY_HOST
+void SetSidebarFont(ImFont* font);
+#endif
 // The quick menu's sidebar icons: Settings, Restart and Exit Game (0 for none).
 void SetSidebarIconTextures(unsigned long long settings, unsigned long long restart,
                             unsigned long long exit);

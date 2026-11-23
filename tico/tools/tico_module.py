@@ -109,15 +109,6 @@ OVERLAY_TAB = ("settings_mgba_tab_display", [
                                              ("Original", "Original"), ("1x", "1x"), ("2x", "2x"),
                                              ("Auto", "Auto")]},
     ]),
-    ("settings_mgba_section_fast_forward", [
-        {"key": "fast_forward_speed", "label": "settings_mgba_fast_forward_speed", "type": "enum",
-         "default": "200", "choices": [("150", "150%"), ("200", "200%"), ("300", "300%"),
-                                        ("400", "400%"), ("unlimited", "Unlimited")]},
-        {"key": "fast_forward_mode", "label": "settings_mgba_fast_forward_mode", "type": "enum",
-         "default": "hold", "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
-        {"key": "fast_forward_hotkey", "label": "settings_mgba_fast_forward_hotkey", "type": "enum",
-         "default": "ZR", "choices": SWITCH_BUTTONS},
-    ]),
     ("settings_mgba_section_hud", [
         {"key": "fps_counter_position", "label": "settings_mgba_fps_counter", "type": "enum",
          "default": "hidden", "choices": POSITIONS},
@@ -141,6 +132,32 @@ CONTROLS_TAB = ("settings_mgba_tab_controls", [
         {"key": "analog_dpad", "label": "settings_mgba_analog_dpad", "type": "bool",
          "default": "enabled"},
     ]),
+    ("settings_mgba_section_hotkeys", [
+        {"key": key, "label": "settings_mgba_" + key, "type": "binding", "default": default}
+        for key, default in [("menu_hotkey", "ZR+ZL"), ("quick_save_hotkey", "ZR+A"),
+                             ("quick_load_hotkey", "ZR+B"), ("screenshot_hotkey", "None")]
+    ]),
+    ("settings_mgba_section_fast_forward", [
+        {"key": "fast_forward_speed", "label": "settings_mgba_fast_forward_speed", "type": "enum",
+         "default": "200", "choices": [("150", "150%"), ("200", "200%"), ("300", "300%"),
+                                        ("400", "400%"), ("unlimited", "Unlimited")]},
+        {"key": "fast_forward_mode", "label": "settings_mgba_fast_forward_mode", "type": "enum",
+         "default": "hold", "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
+        {"key": "fast_forward_hotkey", "label": "settings_mgba_fast_forward_hotkey", "type": "enum",
+         "default": "StickL", "choices": SWITCH_BUTTONS},
+    ]),
+    ("settings_mgba_section_rewind", [
+        {"key": "rewind_hotkey", "label": "settings_mgba_rewind_hotkey", "type": "binding", "default": "StickR"},
+        {"key": "rewind_mode", "label": "settings_mgba_rewind_mode", "type": "enum", "default": "hold",
+         "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
+    ]),
+    ("settings_mgba_section_rapid_fire", [
+        {"key": "rapid_fire_hotkey", "label": "settings_mgba_rapid_fire_hotkey", "type": "binding", "default": "None"},
+        {"key": "rapid_fire_mode", "label": "settings_mgba_rapid_fire_mode", "type": "enum", "default": "hold",
+         "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
+        {"key": "rapid_fire_rate", "label": "settings_mgba_rapid_fire_rate", "type": "enum", "default": "5",
+         "choices": [("1", "Once per second"), ("5", "Five per second"), ("0.5", "Once every two seconds")]},
+    ]),
     # rumble cartridges and the Game Boy Player
     ("settings_mgba_section_vibration", [
         {"key": "vibration", "label": "settings_mgba_vibration", "type": "bool",
@@ -154,6 +171,18 @@ CONTROLS_TAB = ("settings_mgba_tab_controls", [
 
 # Labels the core does not define. key -> (en, de, es, fr, ja, pt, ru, zh)
 LABELS = {
+    "settings_mgba_section_hotkeys": ("Shortcuts",) * 7 + ("功能按键",),
+    "settings_mgba_menu_hotkey": ("Open menu",) * 7 + ("打开菜单",),
+    "settings_mgba_quick_save_hotkey": ("Quick save",) * 7 + ("快速存档",),
+    "settings_mgba_quick_load_hotkey": ("Quick load",) * 7 + ("快速读档",),
+    "settings_mgba_screenshot_hotkey": ("Screenshot",) * 7 + ("截图",),
+    "settings_mgba_section_rewind": ("Rewind",) * 7 + ("倒带",),
+    "settings_mgba_rewind_hotkey": ("Rewind button",) * 7 + ("倒带按键",),
+    "settings_mgba_rewind_mode": ("Rewind mode",) * 7 + ("倒带触发方式",),
+    "settings_mgba_section_rapid_fire": ("Rapid fire",) * 7 + ("连发",),
+    "settings_mgba_rapid_fire_hotkey": ("Rapid fire button",) * 7 + ("连发触发键",),
+    "settings_mgba_rapid_fire_mode": ("Rapid fire mode",) * 7 + ("连发触发方式",),
+    "settings_mgba_rapid_fire_rate": ("Rapid fire rate",) * 7 + ("连发速度",),
     # tico's own tab and section titles for mGBA; tico-nx's wording wins for
     # the languages it has, these fill German and Russian
     "settings_mgba_tab_system": ("System", "System", "Sistema", "Système", "システム", "Sistema",
@@ -415,6 +444,11 @@ def build_strings(dump: dict, settings: dict,
         if lang != "en":
             for choice, translations in CHOICES.items():
                 out[value_key(choice)] = translations[index - 1]
+            for choice in ("Hold", "Toggle"):
+                out[choice] = out[value_key(choice)]
+        if lang == "zh":
+            out.update({"Once per second": "一秒一次", "Five per second": "一秒五次",
+                        "Once every two seconds": "两秒一次"})
         if lang == "en":
             for key in list(out):
                 if key.startswith("settings_mgba_value_"):

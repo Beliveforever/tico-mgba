@@ -138,6 +138,9 @@ public:
     bool SavePersistent();
     bool SaveState(const std::string &path);
     bool LoadState(const std::string &path);
+    void RecordRewind();
+    bool RewindStep();
+    void ClearRewind();
 
     /// True while rc_client runs the session in hardcore mode. Loading states
     /// (and rewind, cheats, slow motion) must stay unavailable then.
@@ -175,6 +178,13 @@ public:
     }
 
 private:
+    struct RewindPoint {
+        std::vector<uint8_t> state, progress;
+        std::size_t size() const { return state.size()+progress.size(); }
+    };
+    std::deque<RewindPoint> m_rewind;
+    std::size_t m_rewindBytes = 0;
+    bool m_renderingRewind = false;
     void InitializeCore();
     void SetupCallbacks();
 

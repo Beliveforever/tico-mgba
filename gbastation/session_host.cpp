@@ -168,6 +168,13 @@ std::string directory(const char* name) {
     return dataRoot.string() + "/";
 }
 
+std::string screenshotDirectory() {
+    const auto path=storage.savepath/"screenshots";
+    if(!launchingGame()||!emulation::insideDirectory(path,profileDirectory))
+        throw std::runtime_error("Invalid WoPlay screenshot path");
+    return path.string();
+}
+
 std::string batteryFile(const char* extension, bool loading) {
     const auto file = storage.savepath / (std::string("save") + extension);
     if (!emulation::insideDirectory(file, profileDirectory))

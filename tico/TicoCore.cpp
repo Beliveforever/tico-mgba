@@ -1096,6 +1096,7 @@ bool TicoCore::LoadGame(const std::string &path)
 
 void TicoCore::UnloadGame()
 {
+    ClearRewind();
 #ifdef __SWITCH__
     StopSixAxis();
 #endif
@@ -1147,6 +1148,7 @@ void TicoCore::RunFrame()
 
 void TicoCore::Reset()
 {
+    ClearRewind();
     if (m_gameLoaded)
     {
         retro_reset();
@@ -1558,6 +1560,7 @@ bool TicoCore::LoadState(const std::string &path)
 
     if (success)
     {
+        ClearRewind();
         tico_debug_log("Loaded state from %s", path.c_str());
         // Restore achievement progress with the state; a state saved without
         // it resets progress, so nothing from the abandoned timeline counts.
@@ -1591,6 +1594,57 @@ bool TicoCore::LoadState(const std::string &path)
     return success;
 }
 
+void TicoCore::ClearRewind()
+{
+    m_rewind.clear();
+    m_rewindBytes=0;
+}
+
+void TicoCore::RecordRewind()
+{
+    if(!m_gameLoaded||IsHardcoreActive()){
+        ClearRewind();
+        return;
+    }
+    constexpr std::size_t byteLimit=16*1024*1024, pointLimit=90;
+    const auto stateSize=retro_serialize_size();
+    const auto progressSize=m_rcClient?rc_client_progress_size(m_rcClient):0;
+    if(!stateSize||stateSize>byteLimit||progressSize>byteLimit-stateSize)return;
+    RewindPoint point;
+    point.state.resize(stateSize);
+    if(!retro_serialize(point.state.data(),stateSize))return;
+    if(progressSize){
+        point.progress.resize(progressSize);
+        if(rc_client_serialize_progress_sized(m_rcClient,point.progress.data(),progressSize)!=RC_OK)
+            point.progress.clear();
+    }
+    while(!m_rewind.empty()&&(m_rewindBytes+point.size()>byteLimit||m_rewind.size()>=pointLimit)){
+        m_rewindBytes-=m_rewind.front().size();
+        m_rewind.pop_front();
+    }
+    m_rewindBytes+=point.size();
+    m_rewind.push_back(std::move(point));
+}
+
+bool TicoCore::RewindStep()
+{
+    if(!m_gameLoaded||IsHardcoreActive()||m_rewind.empty())return false;
+    auto point=std::move(m_rewind.back());
+    m_rewind.pop_back();
+    m_rewindBytes-=point.size();
+    if(!retro_unserialize(point.state.data(),point.state.size())){
+        ClearRewind();
+        return false;
+    }
+    if(m_rcClient&&(point.progress.empty()||rc_client_deserialize_progress_sized(m_rcClient,point.progress.data(),point.progress.size())!=RC_OK))
+        rc_client_deserialize_progress_sized(m_rcClient,nullptr,0);
+    ClearInputs();
+    m_renderingRewind=true;
+    retro_run();
+    m_renderingRewind=false;
+    return true;
+}
+
 //==============================================================================
 // Libretro Callbacks
 //==============================================================================
@@ -1612,7 +1666,7 @@ void TicoCore::VideoRefreshCallback(const void *data, unsigned width,
 
 void TicoCore::AudioSampleCallback(int16_t left, int16_t right)
 {
-    if (s_instance && s_instance->m_audioSampleCallback)
+    if (s_instance && !s_instance->m_renderingRewind && s_instance->m_audioSampleCallback)
     {
         s_instance->m_audioSampleCallback(left, right);
     }
@@ -1620,7 +1674,7 @@ void TicoCore::AudioSampleCallback(int16_t left, int16_t right)
 
 size_t TicoCore::AudioSampleBatchCallback(const int16_t *data, size_t frames)
 {
-    if (s_instance && s_instance->m_audioSampleBatchCallback)
+    if (s_instance && !s_instance->m_renderingRewind && s_instance->m_audioSampleBatchCallback)
     {
         return s_instance->m_audioSampleBatchCallback(data, frames);
     }

@@ -27,6 +27,10 @@
 #endif
 
 #include <imgui.h>
+#ifdef WOPLAY_HOST
+#include "woplay/ui_components/opacity.hpp"
+#include "woplay/ui_components/sidebar_row.hpp"
+#endif
 
 namespace SwitchFrontend::OverlayUI {
 
@@ -98,6 +102,9 @@ int s_side_selected = 0;
 // where GameConfirm returns to on Cancel
 bool s_confirm_from_side = false;
 std::array<unsigned long long, kSidebarCount> s_side_icons{};
+#ifdef WOPLAY_HOST
+ImFont* s_sidebar_font = nullptr;
+#endif
 
 // One line of whatever list is on screen. Every menu is drawn from these, so
 // they all share scrolling, selection and layout.
@@ -1402,11 +1409,31 @@ std::string QuickItemHint(QuickItem item) {
     }
 }
 
+#ifdef WOPLAY_HOST
+void DrawQuickRow(ImDrawList& draw, ImVec2 min, ImVec2 max, QuickItem item,
+                  const std::string& label, bool focused, float scale, float ease) {
+    using namespace gbastation;
+    static constexpr const char* icons[] = {u8"\ue161",u8"\ue2c8",u8"\ue042",u8"\ue019",
+        u8"\ue3e7",u8"\ue8b8",u8"\ue5d5",u8"\ue863",u8"\ue879"};
+    const int index = static_cast<int>(item);
+    resources::Fonts fonts{};
+    fonts.text = ImGui::GetFont();
+    fonts.icons = s_sidebar_font;
+    const ui::ScopedDrawOpacity opacity(draw,ease);
+    ui::sidebarRow(draw,fonts,{min,max},index%7,scale,label.c_str(),icons[index],focused,
+                   RowTextColor(false,true,255),RowTextColor(false,false,255));
+}
+#endif
+
 // The quick menu's icon rail, left of the list and centred on it: Settings,
 // Restart and Exit Game, the focused one with its name beside it.
 void RenderSidebar(ImDrawList* dl, ImVec2 menu_pos, ImVec2 menu_size, float item_height, float ease) {
     const float scale = ImGui::GetIO().FontGlobalScale;
-    const float width = 76.0f * scale;
+    bool styled = false;
+#ifdef WOPLAY_HOST
+    styled = s_sidebar_font != nullptr;
+#endif
+    const float width = (styled?200.0f:76.0f) * scale;
     const float gap = 12.0f * scale;
     const float corner_radius = 16.0f * scale;
     const int alpha = static_cast<int>(255.0f * ease);
@@ -1414,7 +1441,7 @@ void RenderSidebar(ImDrawList* dl, ImVec2 menu_pos, ImVec2 menu_size, float item
     const ImVec2 rail_min(std::max(24.0f * scale, menu_pos.x - gap - width),
                           menu_pos.y + ((menu_size.y - rail_h) * 0.5f));
     const ImVec2 rail_max(rail_min.x + width, rail_min.y + rail_h);
-    dl->AddRectFilled(rail_min, rail_max, PanelColor(alpha), corner_radius);
+    if (!styled) dl->AddRectFilled(rail_min, rail_max, PanelColor(alpha), corner_radius);
     AddHit(rail_min, rail_max, HitKind::Panel);
 
     const float icon_size = 28.0f * scale;
@@ -1423,6 +1450,13 @@ void RenderSidebar(ImDrawList* dl, ImVec2 menu_pos, ImVec2 menu_size, float item
         const ImVec2 item_max(rail_max.x, item_min.y + item_height);
         const bool selected = s_side_focus && s_side_selected == i;
         AddHit(item_min, item_max, HitKind::SideItem, i);
+#ifdef WOPLAY_HOST
+        if (styled) {
+            const auto item=kSidebarItems[i];
+            DrawQuickRow(*dl,item_min,{item_max.x,item_max.y-5*scale},item,QuickItemLabel(item),selected,scale,ease);
+            continue;
+        }
+#endif
         if (selected) {
             DrawSelection(dl, item_min, item_max, corner_radius, ease);
         }
@@ -1459,36 +1493,70 @@ void RenderMenu(ImDrawList* dl, ImVec2 display_size, float ease, const std::vect
     const ImVec2 menu_pos((display_size.x - menu_size.x) * 0.5f, current_y);
     const float corner_radius = 16.0f * scale;
     const int alpha = static_cast<int>(255.0f * ease);
+    const bool quick = s_menu == MenuScreen::QuickMenu;
+    bool styled = false;
+#ifdef WOPLAY_HOST
+    styled = quick && s_sidebar_font;
+#endif
 
-    dl->AddRectFilled(menu_pos, ImVec2(menu_pos.x + menu_size.x, menu_pos.y + menu_size.y),
+    if (!styled) dl->AddRectFilled(menu_pos, ImVec2(menu_pos.x + menu_size.x, menu_pos.y + menu_size.y),
                       PanelColor(alpha), corner_radius);
     AddHit(menu_pos, ImVec2(menu_pos.x + menu_size.x, menu_pos.y + menu_size.y), HitKind::Panel);
 
     const float label_size = ImGui::GetFontSize() * (wide ? 0.82f : 0.85f);
     const int first_visible = FirstVisibleRow(s_selected, item_count, visible_count);
-    const bool quick = s_menu == MenuScreen::QuickMenu;
+    const auto quickItems = quick ? BuildQuickItems() : std::vector<QuickItem>{};
     if (quick) {
         RenderSidebar(dl, menu_pos, menu_size, item_height, ease);
     }
+#ifdef WOPLAY_HOST
+    if (styled && s_side_focus) {
+        const auto item=kSidebarItems[s_side_selected];
+        auto heading=QuickItemLabel(item);
+        std::vector<MenuRow> options;
+        if (item==QuickItem::Settings) {
+            for (int i=0;i<CategoryCount();++i) options.push_back({CategoryLabel(i)});
+        } else {
+            options.push_back({heading});
+            options.push_back({TrOr("emulator_cancel","Cancel")});
+            heading=item==QuickItem::Restart
+                ? TrOr("emulator_restart_confirm","Restart the game?")
+                : TrOr("emulator_exit_confirm","Exit the game?");
+        }
+        const ImVec2 headingEnd(menu_pos.x+menu_size.x,menu_pos.y+item_height);
+        DrawRowContent(dl,{heading},menu_pos,headingEnd,false,ease,label_size);
+        const auto shown=std::min(static_cast<int>(options.size()),visible_count-1);
+        for (int i=0;i<shown;++i) {
+            const ImVec2 min(menu_pos.x,headingEnd.y+i*item_height);
+            DrawRowContent(dl,options[i],min,{headingEnd.x,min.y+item_height},false,ease,label_size*.90f);
+        }
+        return;
+    }
+#endif
     for (int row_index = 0; row_index < visible_count; ++row_index) {
         const int i = first_visible + row_index;
         const bool selected = s_selected == i && !(quick && s_side_focus);
         const float item_y = menu_pos.y + (static_cast<float>(row_index) * item_height);
         const ImVec2 item_min(menu_pos.x, item_y);
         const ImVec2 item_max(menu_pos.x + menu_size.x, item_y + item_height);
-        if (selected) {
+        if (selected && !styled) {
             DrawSelection(dl, item_min, item_max, corner_radius, ease);
         }
         AddHit(item_min, item_max, HitKind::MenuRow, i);
-        DrawRowContent(dl, rows[static_cast<std::size_t>(i)], item_min, item_max, selected, ease,
-                       label_size);
+#ifdef WOPLAY_HOST
+        if (styled && i<static_cast<int>(quickItems.size())) {
+            DrawQuickRow(*dl,item_min,{item_max.x,item_max.y-5*scale},quickItems[i],
+                         rows[i].label,selected,scale,ease);
+        } else
+#endif
+            DrawRowContent(dl, rows[static_cast<std::size_t>(i)], item_min, item_max, selected, ease,
+                           label_size);
         if (quick && selected) {
-            const std::vector<QuickItem> items = BuildQuickItems();
-            if (i < static_cast<int>(items.size())) {
-                const std::string hint = QuickItemHint(items[static_cast<std::size_t>(i)]);
+            if (i < static_cast<int>(quickItems.size())) {
+                const std::string hint = QuickItemHint(quickItems[static_cast<std::size_t>(i)]);
                 if (!hint.empty()) {
                     DrawTooltip(dl, item_max.x + (10.0f * scale), (item_min.y + item_max.y) * 0.5f,
-                                false, QuickItemLabel(items[static_cast<std::size_t>(i)]), hint, alpha);
+                                false, QuickItemLabel(quickItems[static_cast<std::size_t>(i)]), hint, alpha);
                 }
             }
         }
@@ -1691,7 +1759,10 @@ void RenderSettings(ImDrawList* dl, ImVec2 display_size, float ease) {
         // the arrows go first so they win over the row they sit on
         DrawRowContent(dl, rows[static_cast<std::size_t>(i)], item_min, item_max, selected, ease,
                        label_size, selected);
-        AddHit(item_min, item_max, HitKind::OptionRow, i);
+#ifdef WOPLAY_HOST
+        if (options_focused)
+#endif
+            AddHit(item_min, item_max, HitKind::OptionRow, i);
     }
     DrawScrollbar(dl, panel_max.x - (8.0f * scale), list_top, list_bottom - list_top, first_option,
                   option_visible, option_count, ease);
@@ -2612,7 +2683,11 @@ NavInput ApplyTouch(ImVec2 display_size, int item_count, NavInput nav) {
         nav.accept = s_touch_started_selected;
         break;
     case HitKind::CategoryRow:
+#ifdef WOPLAY_HOST
+        nav.accept = s_touch_started_selected;
+#else
         nav.right = s_touch_started_selected; // into its options
+#endif
         break;
     case HitKind::StepLeft:
         nav.left = true;
@@ -2702,6 +2777,10 @@ void SetNickname(std::string nickname) {
 void SetAvatarTextureId(unsigned long long texture_id) {
     s_avatar_texture_id = texture_id;
 }
+
+#ifdef WOPLAY_HOST
+void SetSidebarFont(ImFont* font) { s_sidebar_font = font; }
+#endif
 
 void SetSidebarIconTextures(unsigned long long settings, unsigned long long restart,
                             unsigned long long exit) {
@@ -3091,10 +3170,12 @@ Action Render(int display_w, int display_h) {
     // after the options were stepped, so the right that opens them changes nothing
     if (s_menu == MenuScreen::SettingsCategories) {
         s_category_selected = s_selected;
+#ifndef WOPLAY_HOST
         if (nav.right && !nav.accept) {
             OpenScreen(MenuScreen::SettingsOptions);
             rows = BuildRows();
         }
+#endif
     }
 
     Action result = Action::None;
