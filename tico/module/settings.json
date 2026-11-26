@@ -7,6 +7,78 @@
   ],
   "bool_true_value": "enabled",
   "bool_false_value": "disabled",
+  "choice_sets": {
+    "standalone_buttons": [
+      {
+        "label": "A",
+        "value": "A"
+      },
+      {
+        "label": "B",
+        "value": "B"
+      },
+      {
+        "label": "X",
+        "value": "X"
+      },
+      {
+        "label": "Y",
+        "value": "Y"
+      },
+      {
+        "label": "L",
+        "value": "L"
+      },
+      {
+        "label": "R",
+        "value": "R"
+      },
+      {
+        "label": "ZL",
+        "value": "ZL"
+      },
+      {
+        "label": "ZR",
+        "value": "ZR"
+      },
+      {
+        "label": "Plus",
+        "value": "Plus"
+      },
+      {
+        "label": "Minus",
+        "value": "Minus"
+      },
+      {
+        "label": "Left stick",
+        "value": "StickL"
+      },
+      {
+        "label": "Right stick",
+        "value": "StickR"
+      },
+      {
+        "label": "Up",
+        "value": "Up"
+      },
+      {
+        "label": "Down",
+        "value": "Down"
+      },
+      {
+        "label": "Left",
+        "value": "Left"
+      },
+      {
+        "label": "Right",
+        "value": "Right"
+      },
+      {
+        "label": "Disabled",
+        "value": "None"
+      }
+    ]
+  },
   "tabs": [
     {
       "name": "settings_mgba_tab_system",
@@ -732,762 +804,72 @@
             {
               "key": "map_a",
               "label": "settings_mgba_map_a",
-              "type": "enum",
+              "type": "binding",
               "default": "A",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_b",
               "label": "settings_mgba_map_b",
-              "type": "enum",
+              "type": "binding",
               "default": "B",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_l",
               "label": "settings_mgba_map_l",
-              "type": "enum",
+              "type": "binding",
               "default": "L",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_r",
               "label": "settings_mgba_map_r",
-              "type": "enum",
+              "type": "binding",
               "default": "R",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_start",
               "label": "settings_mgba_map_start",
-              "type": "enum",
+              "type": "binding",
               "default": "Plus",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_select",
               "label": "settings_mgba_map_select",
-              "type": "enum",
+              "type": "binding",
               "default": "Minus",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_up",
               "label": "settings_mgba_map_up",
-              "type": "enum",
+              "type": "binding",
               "default": "Up",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_down",
               "label": "settings_mgba_map_down",
-              "type": "enum",
+              "type": "binding",
               "default": "Down",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_left",
               "label": "settings_mgba_map_left",
-              "type": "enum",
+              "type": "binding",
               "default": "Left",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "map_right",
               "label": "settings_mgba_map_right",
-              "type": "enum",
+              "type": "binding",
               "default": "Right",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
+              "choices_ref": "standalone_buttons"
             },
             {
               "key": "analog_dpad",
@@ -1523,6 +905,37 @@
               "label": "settings_mgba_screenshot_hotkey",
               "type": "binding",
               "default": "None"
+            },
+            {
+              "key": "rewind_hotkey",
+              "label": "settings_mgba_rewind_hotkey",
+              "type": "binding",
+              "default": "StickR"
+            },
+            {
+              "key": "rapid_fire_hotkey",
+              "label": "settings_mgba_rapid_fire_hotkey",
+              "type": "binding",
+              "default": "None"
+            },
+            {
+              "key": "turbo_a_hotkey",
+              "label": "settings_mgba_turbo_a_hotkey",
+              "type": "binding",
+              "default": "None"
+            },
+            {
+              "key": "turbo_b_hotkey",
+              "label": "settings_mgba_turbo_b_hotkey",
+              "type": "binding",
+              "default": "None"
+            },
+            {
+              "key": "fast_forward_hotkey",
+              "label": "settings_mgba_fast_forward_hotkey",
+              "type": "binding",
+              "default": "StickL",
+              "choices_ref": "standalone_buttons"
             }
           ]
         },
@@ -1572,94 +985,12 @@
                   "value": "toggle"
                 }
               ]
-            },
-            {
-              "key": "fast_forward_hotkey",
-              "label": "settings_mgba_fast_forward_hotkey",
-              "type": "enum",
-              "default": "StickL",
-              "choices": [
-                {
-                  "label": "A",
-                  "value": "A"
-                },
-                {
-                  "label": "B",
-                  "value": "B"
-                },
-                {
-                  "label": "X",
-                  "value": "X"
-                },
-                {
-                  "label": "Y",
-                  "value": "Y"
-                },
-                {
-                  "label": "L",
-                  "value": "L"
-                },
-                {
-                  "label": "R",
-                  "value": "R"
-                },
-                {
-                  "label": "ZL",
-                  "value": "ZL"
-                },
-                {
-                  "label": "ZR",
-                  "value": "ZR"
-                },
-                {
-                  "label": "Plus",
-                  "value": "Plus"
-                },
-                {
-                  "label": "Minus",
-                  "value": "Minus"
-                },
-                {
-                  "label": "Left stick",
-                  "value": "StickL"
-                },
-                {
-                  "label": "Right stick",
-                  "value": "StickR"
-                },
-                {
-                  "label": "Up",
-                  "value": "Up"
-                },
-                {
-                  "label": "Down",
-                  "value": "Down"
-                },
-                {
-                  "label": "Left",
-                  "value": "Left"
-                },
-                {
-                  "label": "Right",
-                  "value": "Right"
-                },
-                {
-                  "label": "Disabled",
-                  "value": "None"
-                }
-              ]
             }
           ]
         },
         {
           "title": "settings_mgba_section_rewind",
           "options": [
-            {
-              "key": "rewind_hotkey",
-              "label": "settings_mgba_rewind_hotkey",
-              "type": "binding",
-              "default": "StickR"
-            },
             {
               "key": "rewind_mode",
               "label": "settings_mgba_rewind_mode",
@@ -1681,12 +1012,6 @@
         {
           "title": "settings_mgba_section_rapid_fire",
           "options": [
-            {
-              "key": "rapid_fire_hotkey",
-              "label": "settings_mgba_rapid_fire_hotkey",
-              "type": "binding",
-              "default": "None"
-            },
             {
               "key": "rapid_fire_mode",
               "label": "settings_mgba_rapid_fire_mode",

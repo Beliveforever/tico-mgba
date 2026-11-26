@@ -119,6 +119,8 @@
     "settings_mgba_quick_load_hotkey": "快速读档",
     "settings_mgba_quick_save_hotkey": "快速存档",
     "settings_mgba_rapid_fire_hotkey": "连发触发键",
+    "settings_mgba_turbo_a_hotkey": "A 键连发",
+    "settings_mgba_turbo_b_hotkey": "B 键连发",
     "settings_mgba_rapid_fire_mode": "连发触发方式",
     "settings_mgba_rapid_fire_rate": "连发速度",
     "settings_mgba_rendered_resolution": "渲染分辨率",

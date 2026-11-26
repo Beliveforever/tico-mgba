@@ -201,14 +201,15 @@ struct Catalogue {
     }
 };
 
-bool ParseOption(Catalogue& catalogue, const nlohmann::json& source, OptionDef& option) {
+bool ParseOption(Catalogue& catalogue, const nlohmann::json& source,
+                 const nlohmann::json& choice_sets, OptionDef& option) {
     const std::string type = source.value("type", "");
     if (!source.contains("key") || !source["key"].is_string()) {
         return false;
     }
     if (type == "bool") {
         option.type = OptionType::Toggle;
-    } else if (type == "enum") {
+    } else if (type == "enum" || (type == "binding" && source.contains("choices_ref"))) {
         option.type = OptionType::Choice;
     } else if (type == "string") {
         option.type = OptionType::Text;
@@ -227,7 +228,10 @@ bool ParseOption(Catalogue& catalogue, const nlohmann::json& source, OptionDef& 
     option.choice_count = 0;
     if (option.type == OptionType::Choice) {
         std::vector<OptionChoice> choices;
-        for (const nlohmann::json& choice : source.value("choices", nlohmann::json::array())) {
+        const auto values=source.contains("choices_ref")
+            ?choice_sets.value(source.at("choices_ref").get<std::string>(),nlohmann::json::array())
+            :source.value("choices",nlohmann::json::array());
+        for (const nlohmann::json& choice : values) {
             const std::string value =
                 choice.contains("value") ? JsonScalarToString(choice["value"]) : "";
             const std::string label = choice.value("label", value);
@@ -263,13 +267,14 @@ Catalogue LoadCatalogue() {
     }
     s_bool_true = root.value("bool_true_value", s_bool_true);
     s_bool_false = root.value("bool_false_value", s_bool_false);
+    const auto choice_sets=root.value("choice_sets",nlohmann::json::object());
 
     for (const nlohmann::json& tab : root.value("tabs", nlohmann::json::array())) {
         std::vector<OptionDef> options;
         for (const nlohmann::json& section : tab.value("sections", nlohmann::json::array())) {
             for (const nlohmann::json& source : section.value("options", nlohmann::json::array())) {
                 OptionDef option{};
-                if (!ParseOption(catalogue, source, option)) {
+                if (!ParseOption(catalogue, source, choice_sets, option)) {
                     continue;
                 }
                 options.push_back(option);

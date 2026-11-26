@@ -172,6 +172,11 @@ std::string translate(const std::string& key) {
         {"暂停菜单","Pause menu"}, {"继续游戏","Resume"}, {"即时存档","Save states"}, {"按键设置","Controls"},
         {"核心设置","Core settings"}, {"游戏设置","Game settings"}, {"退出游戏","Quit game"},
         {"确认","Confirm"}, {"取消","Cancel"}, {"返回","Back"}, {"进入子页","Enter page"}, {"自动存档","Auto save"},
+        {"未设置","Unassigned"}, {"当前绑定","Current binding"}, {"替换绑定","Replace"},
+        {"添加一组","Add binding"}, {"清除绑定","Clear"}, {"长按取消","Hold to cancel"},
+        {"先松开确认键","Release the confirm button first"},
+        {"按住按键、组合键或拨动摇杆，松开后保存","Hold the buttons or move a stick. Release to save."},
+        {"绑定过长，请替换或清除后重试","Too many inputs. Replace or clear a binding first."},
         {"槽位","Slot"}, {"空槽位","Empty"}, {"无缩略图","No preview"}, {"已保存","Saved"}, {"读取即时存档","Load state"},
         {"只读","Read only"}, {"覆盖存档","Overwrite"},
         {"保存即时存档","Save state"}, {"保存后退出游戏并返回 WoPlay？","Save and return to WoPlay?"},
@@ -507,7 +512,7 @@ void input(SDL_GameController* pad) {
     }
     const auto x = pad ? SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX) : 0;
     const auto y = pad ? SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY) : 0;
-    const bool capture=bindingActive();
+    const bool capture=menu&&menu->bindingListening();
     key(ImGuiKey_GamepadDpadUp, SDL_CONTROLLER_BUTTON_DPAD_UP, !capture&&y < -16000);
     key(ImGuiKey_GamepadDpadDown, SDL_CONTROLLER_BUTTON_DPAD_DOWN, !capture&&y > 16000);
     key(ImGuiKey_GamepadDpadLeft, SDL_CONTROLLER_BUTTON_DPAD_LEFT, !capture&&x < -16000);

@@ -88,7 +88,7 @@ DEPENDS_ON: dict[str, tuple[str, str]] = {
     "mgba_frameskip_interval": ("mgba_frameskip", "fixed_interval"),
 }
 
-# Switch buttons a GBA button (or the fast-forward hotkey) can sit on.
+# Single-button picker used by the original standalone tico menu.
 SWITCH_BUTTONS = [("A", "A"), ("B", "B"), ("X", "X"), ("Y", "Y"), ("L", "L"), ("R", "R"),
                   ("ZL", "ZL"), ("ZR", "ZR"), ("Plus", "Plus"), ("Minus", "Minus"),
                   ("StickL", "Left stick"), ("StickR", "Right stick"), ("Up", "Up"),
@@ -121,8 +121,8 @@ OVERLAY_TAB = ("settings_mgba_tab_display", [
 # namesake by default.
 CONTROLS_TAB = ("settings_mgba_tab_controls", [
     ("settings_mgba_section_button_mapping", [
-        {"key": key, "label": "settings_mgba_" + key, "type": "enum", "default": default,
-         "choices": SWITCH_BUTTONS}
+        {"key": key, "label": "settings_mgba_" + key, "type": "binding", "default": default,
+         "choices_ref": "standalone_buttons"}
         for key, default in [
             ("map_a", "A"), ("map_b", "B"),
             ("map_l", "L"), ("map_r", "R"), ("map_start", "Plus"), ("map_select", "Minus"),
@@ -135,7 +135,12 @@ CONTROLS_TAB = ("settings_mgba_tab_controls", [
     ("settings_mgba_section_hotkeys", [
         {"key": key, "label": "settings_mgba_" + key, "type": "binding", "default": default}
         for key, default in [("menu_hotkey", "ZR+ZL"), ("quick_save_hotkey", "ZR+A"),
-                             ("quick_load_hotkey", "ZR+B"), ("screenshot_hotkey", "None")]
+                             ("quick_load_hotkey", "ZR+B"), ("screenshot_hotkey", "None"),
+                             ("rewind_hotkey", "StickR"), ("rapid_fire_hotkey", "None"),
+                             ("turbo_a_hotkey", "None"), ("turbo_b_hotkey", "None")]
+    ] + [
+        {"key": "fast_forward_hotkey", "label": "settings_mgba_fast_forward_hotkey", "type": "binding",
+         "default": "StickL", "choices_ref": "standalone_buttons"},
     ]),
     ("settings_mgba_section_fast_forward", [
         {"key": "fast_forward_speed", "label": "settings_mgba_fast_forward_speed", "type": "enum",
@@ -143,16 +148,12 @@ CONTROLS_TAB = ("settings_mgba_tab_controls", [
                                         ("400", "400%"), ("unlimited", "Unlimited")]},
         {"key": "fast_forward_mode", "label": "settings_mgba_fast_forward_mode", "type": "enum",
          "default": "hold", "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
-        {"key": "fast_forward_hotkey", "label": "settings_mgba_fast_forward_hotkey", "type": "enum",
-         "default": "StickL", "choices": SWITCH_BUTTONS},
     ]),
     ("settings_mgba_section_rewind", [
-        {"key": "rewind_hotkey", "label": "settings_mgba_rewind_hotkey", "type": "binding", "default": "StickR"},
         {"key": "rewind_mode", "label": "settings_mgba_rewind_mode", "type": "enum", "default": "hold",
          "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
     ]),
     ("settings_mgba_section_rapid_fire", [
-        {"key": "rapid_fire_hotkey", "label": "settings_mgba_rapid_fire_hotkey", "type": "binding", "default": "None"},
         {"key": "rapid_fire_mode", "label": "settings_mgba_rapid_fire_mode", "type": "enum", "default": "hold",
          "choices": [("hold", "Hold"), ("toggle", "Toggle")]},
         {"key": "rapid_fire_rate", "label": "settings_mgba_rapid_fire_rate", "type": "enum", "default": "5",
@@ -181,6 +182,8 @@ LABELS = {
     "settings_mgba_rewind_mode": ("Rewind mode",) * 7 + ("倒带触发方式",),
     "settings_mgba_section_rapid_fire": ("Rapid fire",) * 7 + ("连发",),
     "settings_mgba_rapid_fire_hotkey": ("Rapid fire button",) * 7 + ("连发触发键",),
+    "settings_mgba_turbo_a_hotkey": ("Turbo A", "Dauerfeuer A", "Disparo rápido A", "Tir rapide A", "Aボタン連射", "Turbo A", "Турбо A", "A 键连发"),
+    "settings_mgba_turbo_b_hotkey": ("Turbo B", "Dauerfeuer B", "Disparo rápido B", "Tir rapide B", "Bボタン連射", "Turbo B", "Турбо B", "B 键连发"),
     "settings_mgba_rapid_fire_mode": ("Rapid fire mode",) * 7 + ("连发触发方式",),
     "settings_mgba_rapid_fire_rate": ("Rapid fire rate",) * 7 + ("连发速度",),
     # tico's own tab and section titles for mGBA; tico-nx's wording wins for
@@ -364,6 +367,16 @@ def label_key(key: str) -> str:
     return LABEL_KEYS.get(key, "settings_mgba_" + key.removeprefix("mgba_"))
 
 
+def overlay_tab(definition):
+    tab, sections = definition
+    return {"name": tab, "sections": [
+        {"title": title, "options": [
+            {**o, "choices": [{"label": l, "value": v} for v, l in o["choices"]]}
+            if "choices" in o else dict(o)
+            for o in options]}
+        for title, options in sections]}
+
+
 def build_settings(dump: dict) -> dict:
     core = {o["key"]: o for o in dump["en"]}
     placed = {key for _, sections in LAYOUT for _, keys in sections for key in keys}
@@ -394,15 +407,6 @@ def build_settings(dump: dict) -> dict:
             out_sections.append({"title": title, "options": options})
         tabs.append({"name": tab, "sections": out_sections})
 
-    def overlay_tab(definition):
-        tab, sections = definition
-        return {"name": tab, "sections": [
-            {"title": title, "options": [
-                {**o, "choices": [{"label": l, "value": v} for v, l in o["choices"]]}
-                if "choices" in o else dict(o)
-                for o in options]}
-            for title, options in sections]}
-
     tabs.insert(1, overlay_tab(OVERLAY_TAB))
     tabs.append(overlay_tab(CONTROLS_TAB))
 
@@ -413,6 +417,8 @@ def build_settings(dump: dict) -> dict:
         "slugs": ["gba"],
         "bool_true_value": "enabled",
         "bool_false_value": "disabled",
+        "choice_sets": {"standalone_buttons": [{"label": label, "value": value}
+                                                for value, label in SWITCH_BUTTONS]},
         "tabs": tabs,
     }
 

@@ -64,7 +64,7 @@ target_include_directories(woplay-mgba PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gene
     "${TICO}/deps/SPIRV-Reflect" "${ROOT}/src/platform/libretro"
     "${LRC}/include")
 target_compile_definitions(woplay-mgba PRIVATE WOPLAY_HOST IMGUI_IMPL_VULKAN_NO_PROTOTYPES
-    TICO_APP_VERSION="3.0.2-woplay.1")
+    TICO_APP_VERSION="3.0.2-woplay.3")
 target_link_libraries(woplay-mgba PRIVATE gbs::core_ui mgba_libretro rcheevos glslang
     glslang-default-resource-limits Threads::Threads)
 

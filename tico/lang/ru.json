@@ -112,6 +112,8 @@
     "settings_mgba_quick_load_hotkey": "Quick load",
     "settings_mgba_quick_save_hotkey": "Quick save",
     "settings_mgba_rapid_fire_hotkey": "Rapid fire button",
+    "settings_mgba_turbo_a_hotkey": "Турбо A",
+    "settings_mgba_turbo_b_hotkey": "Турбо B",
     "settings_mgba_rapid_fire_mode": "Rapid fire mode",
     "settings_mgba_rapid_fire_rate": "Rapid fire rate",
     "settings_mgba_rendered_resolution": "Разрешение рендеринга",

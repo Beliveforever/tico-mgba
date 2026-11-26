@@ -1481,16 +1481,20 @@ static bool MappingHeld(const std::string& value,uint32_t held,bool keyboard,uin
 {
 #ifdef WOPLAY_HOST
     if(woplay_host::active()){
-        uint32_t mask=0;
-        const bool down=gbastation::ui::bindingHeld(value,[&](std::string_view token){
+        const auto chord=gbastation::input_binding::heldChord(value,[&](std::string_view token){
             const auto button=SwitchBitFor(token);
-            mask|=button;
             return button ? (held&button)!=0 : keyboard&&
                 (!consumedKeys||std::find(consumedKeys->begin(),consumedKeys->end(),token)==consumedKeys->end())&&
                 gbastation::ui::keyboardBindingDown(token);
         });
-        if(used)*used=down?mask:0;
-        return down;
+        if(used){
+            *used=0;
+            gbastation::input_binding::everyPart(chord,'+',[&](std::string_view token){
+                *used|=SwitchBitFor(token);
+                return true;
+            });
+        }
+        return !chord.empty();
     }
 #endif
     const auto bit=SwitchBitFor(value);
@@ -1522,13 +1526,13 @@ static const ButtonMapping kButtonMappings[] = {
 #ifdef WOPLAY_HOST
 namespace {
 using InputClock=std::chrono::steady_clock;
-enum Hotkey { Menu, QuickSave, QuickLoad, Screenshot, FastForward, Rewind, RapidFire, HotkeyCount };
+enum Hotkey { Menu, QuickSave, QuickLoad, Screenshot, FastForward, Rewind, RapidFire, TurboA, TurboB, HotkeyCount };
 struct HotkeyDefinition { const char* key; const char* fallback; const char* keyboard; };
 constexpr HotkeyDefinition hotkeyDefinitions[]={
     {"menu_hotkey","ZR+ZL","Key:F1"}, {"quick_save_hotkey","ZR+A","Key:F5"},
     {"quick_load_hotkey","ZR+B","Key:F8"}, {"screenshot_hotkey","None",nullptr},
     {"fast_forward_hotkey","StickL",nullptr}, {"rewind_hotkey","StickR",nullptr},
-    {"rapid_fire_hotkey","None",nullptr},
+    {"rapid_fire_hotkey","None",nullptr}, {"turbo_a_hotkey","None",nullptr}, {"turbo_b_hotkey","None",nullptr}
 };
 struct HotkeyInput {
     bool down=false;
@@ -1544,19 +1548,23 @@ std::chrono::milliseconds rapidInterval{200};
 constexpr std::array rapidActions{RETRO_DEVICE_ID_JOYPAD_A,RETRO_DEVICE_ID_JOYPAD_B,
     RETRO_DEVICE_ID_JOYPAD_L,RETRO_DEVICE_ID_JOYPAD_R};
 std::array<bool,rapidActions.size()> rapidTargets{};
+std::array<bool,rapidActions.size()> directTurbo{};
 std::array<InputClock::time_point,rapidActions.size()> nextRapidPulse{};
 
 HotkeyInput ReadHotkey(std::string_view binding,uint32_t held){
     HotkeyInput input;
-    input.down=gbastation::ui::bindingHeld(binding,[&](std::string_view token){
-        ++input.buttons;
+    const auto chord=gbastation::input_binding::heldChord(binding,[&](std::string_view token){
         const auto bit=SwitchBitFor(token);
-        if(bit){input.pad|=bit;return (held&bit)!=0;}
-        if(!gbastation::ui::keyboardBindingDown(token))return false;
-        input.keys.emplace_back(token);
+        return bit?(held&bit)!=0:gbastation::ui::keyboardBindingDown(token);
+    });
+    input.down=!chord.empty();
+    input.buttons=gbastation::input_binding::chordSize(chord);
+    gbastation::input_binding::everyPart(chord,'+',[&](std::string_view token){
+        if(const auto bit=SwitchBitFor(token))input.pad|=bit;
+        else input.keys.emplace_back(token);
         return true;
     });
-    return input.down?std::move(input):HotkeyInput{};
+    return input;
 }
 
 bool InputHeld(uint32_t held){
@@ -1584,6 +1592,7 @@ void CaptureWoPlayScreenshot(){
 }
 
 bool UpdateWoPlayHotkeys(uint32_t held,uint32_t& consumed,std::vector<std::string>& keys){
+    directTurbo.fill(false);
     std::array<HotkeyInput,HotkeyCount> samples{};
     std::array<int,HotkeyCount> priority{};
     const bool inMenu=g_menuOpen;
@@ -1599,7 +1608,7 @@ bool UpdateWoPlayHotkeys(uint32_t held,uint32_t& consumed,std::vector<std::strin
             if(i==RapidFire)rapidLatched=false;
         }
         samples[i]=ReadHotkey(binding,held);
-        if(!samples[i].down&&def.keyboard&&binding==def.fallback)
+        if(!samples[i].down&&def.keyboard&&gbastation::input_binding::includesChord(binding,def.fallback))
             samples[i]=ReadHotkey(def.keyboard,held);
         if(i==Rewind)rewindAvailable=binding!="None"&&!binding.empty();
     }
@@ -1670,13 +1679,15 @@ bool UpdateWoPlayHotkeys(uint32_t held,uint32_t& consumed,std::vector<std::strin
     rapidInterval=std::chrono::milliseconds(speed=="1"?1000:speed=="0.5"?2000:200);
     rapidTargets.fill(false);
     if(rewinding){g_core->ClearInputs();return false;}
+    directTurbo[0]=down[TurboA];
+    directTurbo[1]=down[TurboB];
     return true;
 }
 
 void ApplyRapidFire(){
     const auto now=InputClock::now();
     for(std::size_t i=0;i<rapidActions.size();++i){
-        if(!rapidEnabled||!rapidTargets[i]){
+        if(!directTurbo[i]&&(!rapidEnabled||!rapidTargets[i])){
             nextRapidPulse[i]={};
             continue;
         }
@@ -2137,12 +2148,11 @@ void HandleInput()
             uint32_t held=controller?SwitchButtonsHeld(controller):0;
             if (analogDpad && controller)
             {
-                const int16_t leftX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-                const int16_t leftY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
-                if (leftY < -16000) held |= SwitchBit(SwitchButton::Up);
-                if (leftY > 16000) held |= SwitchBit(SwitchButton::Down);
-                if (leftX < -16000) held |= SwitchBit(SwitchButton::Left);
-                if (leftX > 16000) held |= SwitchBit(SwitchButton::Right);
+                const auto directions=p==0?held&~ffButton:held;
+                if (directions&SwitchBit(SwitchButton::LStickUp)) held |= SwitchBit(SwitchButton::Up);
+                if (directions&SwitchBit(SwitchButton::LStickDown)) held |= SwitchBit(SwitchButton::Down);
+                if (directions&SwitchBit(SwitchButton::LStickLeft)) held |= SwitchBit(SwitchButton::Left);
+                if (directions&SwitchBit(SwitchButton::LStickRight)) held |= SwitchBit(SwitchButton::Right);
             }
 
             if(p==0)held&=~ffButton;
