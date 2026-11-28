@@ -4,7 +4,7 @@
 Run after merging upstream. It builds tools/dump_core_options.c against the
 core's own libretro_core_options.h, so tico/module/settings.json lists exactly
 the options the libnx core reads (mgba_* keys, values and defaults), laid
-out in tabs, followed by the overlay's own display and controls options.
+out in tabs alongside the overlay's display, controls and binding options.
 Labels are translation keys; the strings go into tico/lang/*.json, taken from
 tico's existing settings labels where an option already had one and otherwise
 from the core's own translations. Choice labels stay English in settings.json;
@@ -54,30 +54,23 @@ LABEL_KEYS = {
 EXCLUDED: set[str] = set()
 
 # (tab, [(section, [option keys])]). Every core option the dump lists must be
-# placed or excluded; the overlay's own tabs are added around these. The tabs
-# and sections are the ones tico already showed for mGBA.
+# placed or excluded. Overlay options are grouped alongside them below.
 LAYOUT = [
     ("settings_mgba_tab_system", [
         ("settings_mgba_section_system", ["mgba_gb_model", "mgba_use_bios", "mgba_skip_bios"]),
+        ("settings_mgba_section_input", ["mgba_allow_opposing_directions",
+                                         "mgba_solar_sensor_level", "mgba_force_gbp"]),
+        ("settings_mgba_section_optimization", ["mgba_idle_optimization"]),
+        ("settings_mgba_section_frameskip", ["mgba_frameskip", "mgba_frameskip_threshold",
+                                             "mgba_frameskip_interval"]),
     ]),
-    ("settings_mgba_tab_video", [
+    ("settings_mgba_tab_av", [
         ("settings_mgba_section_game_boy_options", ["mgba_gb_colors", "mgba_gb_colors_preset",
                                                     "mgba_sgb_borders"]),
         ("settings_mgba_section_enhancements", ["mgba_color_correction",
                                                 "mgba_interframe_blending"]),
-    ]),
-    ("settings_mgba_tab_audio", [
         ("settings_mgba_section_audio_filter", ["mgba_audio_low_pass_filter",
                                                 "mgba_audio_low_pass_range"]),
-    ]),
-    ("settings_mgba_tab_input", [
-        ("settings_mgba_section_input", ["mgba_allow_opposing_directions",
-                                         "mgba_solar_sensor_level", "mgba_force_gbp"]),
-    ]),
-    ("settings_mgba_tab_perf", [
-        ("settings_mgba_section_optimization", ["mgba_idle_optimization"]),
-        ("settings_mgba_section_frameskip", ["mgba_frameskip", "mgba_frameskip_threshold",
-                                             "mgba_frameskip_interval"]),
     ]),
 ]
 
@@ -97,10 +90,10 @@ SWITCH_BUTTONS = [("A", "A"), ("B", "B"), ("X", "X"), ("Y", "Y"), ("L", "L"), ("
 POSITIONS = [("hidden", "Hidden"), ("top_left", "Top left"), ("top_right", "Top right"),
              ("bottom_left", "Bottom left"), ("bottom_right", "Bottom right")]
 
-# The overlay's own options: how the game is scaled, fast forward and the HUD.
+# The overlay's own options for game scaling and the HUD.
 # Shaders are picked in game (Settings > Shaders): tico cannot see the presets
 # on the SD card.
-OVERLAY_TAB = ("settings_mgba_tab_display", [
+DISPLAY_SECTIONS = [
     ("settings_mgba_section_screen", [
         {"key": "display_mode", "label": "settings_mgba_display_mode", "type": "enum",
          "default": "Integer", "choices": [("Integer", "Integer"), ("Display", "Display")]},
@@ -115,11 +108,11 @@ OVERLAY_TAB = ("settings_mgba_tab_display", [
         {"key": "rendered_ir_position", "label": "settings_mgba_rendered_resolution",
          "type": "enum", "default": "hidden", "choices": POSITIONS},
     ]),
-])
+]
 
 # The overlay's button mapping: GBA button -> Switch button, each on its
 # namesake by default.
-CONTROLS_TAB = ("settings_mgba_tab_controls", [
+INPUT_BINDINGS = [
     ("settings_mgba_section_button_mapping", [
         {"key": key, "label": "settings_mgba_" + key, "type": "binding", "default": default,
          "choices_ref": "standalone_buttons"}
@@ -142,6 +135,9 @@ CONTROLS_TAB = ("settings_mgba_tab_controls", [
         {"key": "fast_forward_hotkey", "label": "settings_mgba_fast_forward_hotkey", "type": "binding",
          "default": "StickL", "choices_ref": "standalone_buttons"},
     ]),
+]
+
+CONTROL_SECTIONS = [
     ("settings_mgba_section_fast_forward", [
         {"key": "fast_forward_speed", "label": "settings_mgba_fast_forward_speed", "type": "enum",
          "default": "200", "choices": [("150", "150%"), ("200", "200%"), ("300", "300%"),
@@ -168,7 +164,7 @@ CONTROLS_TAB = ("settings_mgba_tab_controls", [
          "choices": [("25", "25%"), ("50", "50%"), ("75", "75%"), ("100", "100%")],
          "depends_on": {"key": "vibration", "value": "enabled"}},
     ]),
-])
+]
 
 # Labels the core does not define. key -> (en, de, es, fr, ja, pt, ru, zh)
 LABELS = {
@@ -190,6 +186,11 @@ LABELS = {
     # the languages it has, these fill German and Russian
     "settings_mgba_tab_system": ("System", "System", "Sistema", "Système", "システム", "Sistema",
                                  "Система", "系统"),
+    "settings_mgba_tab_av": ("Audio & Video", "Audio & Video", "Audio y vídeo", "Audio et vidéo",
+                             "映像と音声", "Áudio e vídeo", "Звук и видео", "音画"),
+    "settings_mgba_tab_bindings": ("Button Mapping", "Tastenbelegung", "Asignación de botones",
+                                   "Attribution des boutons", "ボタン割り当て", "Mapeamento de botões",
+                                   "Назначение кнопок", "按键映射"),
     "settings_mgba_tab_video": ("Video", "Video", "Vídeo", "Vidéo", "映像", "Vídeo", "Видео", "视频"),
     "settings_mgba_tab_audio": ("Audio", "Audio", "Audio", "Audio", "音声", "Áudio", "Звук", "音频"),
     "settings_mgba_tab_input": ("Input", "Eingabe", "Entrada", "Entrées", "入力", "Entrada",
@@ -367,14 +368,13 @@ def label_key(key: str) -> str:
     return LABEL_KEYS.get(key, "settings_mgba_" + key.removeprefix("mgba_"))
 
 
-def overlay_tab(definition):
-    tab, sections = definition
-    return {"name": tab, "sections": [
+def overlay_sections(sections):
+    return [
         {"title": title, "options": [
             {**o, "choices": [{"label": l, "value": v} for v, l in o["choices"]]}
             if "choices" in o else dict(o)
             for o in options]}
-        for title, options in sections]}
+        for title, options in sections]
 
 
 def build_settings(dump: dict) -> dict:
@@ -405,10 +405,13 @@ def build_settings(dump: dict) -> dict:
                     option["depends_on"] = {"key": on, "value": value}
                 options.append(option)
             out_sections.append({"title": title, "options": options})
+        if tab == "settings_mgba_tab_system":
+            out_sections += overlay_sections(CONTROL_SECTIONS)
+        elif tab == "settings_mgba_tab_av":
+            out_sections = overlay_sections(DISPLAY_SECTIONS) + out_sections
         tabs.append({"name": tab, "sections": out_sections})
 
-    tabs.insert(1, overlay_tab(OVERLAY_TAB))
-    tabs.append(overlay_tab(CONTROLS_TAB))
+    tabs.append({"name": "settings_mgba_tab_bindings", "sections": overlay_sections(INPUT_BINDINGS)})
 
     return {
         "core_id": "mgba",
